@@ -4,125 +4,149 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>物理演算ブロック崩し</title>
-    <!-- Tailwind CSS を読み込み、基本的なスタイルを提供 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* 全体のスタイル設定 */
         body {
-            font-family: 'Inter', sans-serif; /* フォントをInterに設定 */
+            font-family: 'Inter', sans-serif;
             display: flex;
             justify-content: center;
             align-items: center;
-            min-height: 100vh; /* 画面いっぱいに広がるように */
-            background-color: #1a202c; /* ダークな背景色 */
-            color: #e2e8f0; /* 明るいテキスト色 */
+            min-height: 100vh;
+            background-color: #1a202c;
+            color: #e2e8f0;
             margin: 0;
-            overflow: hidden; /* スクロールバーが表示されないように */
+            overflow: hidden;
         }
-        /* ゲームコンテナのスタイル */
         .game-container {
             display: flex;
             flex-direction: column;
             align-items: center;
             padding: 20px;
-            border-radius: 16px; /* 角丸 */
-            background-color: #2d3748; /* コンテナの背景色 */
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.04); /* 影 */
+            border-radius: 16px;
+            background-color: #2d3748;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
         }
-        /* キャンバスのスタイル */
         canvas {
-            background-color: #2d3748; /* キャンバスの背景色 */
-            border-radius: 12px; /* 角丸 */
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); /* 影 */
-            display: block; /* 余分なスペースを削除 */
+            background-color: #2d3748;
+            border-radius: 12px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            display: block;
+            /* キャンバスにフォーカスリングを表示し、ユーザーにフォーカスが当たっていることを視覚的に伝える */
+            outline: none;
         }
-        /* タイトルのスタイル */
         h1 {
             margin-bottom: 20px;
-            color: #63b3ed; /* 青色のタイトル */
-            font-size: 2.25rem; /* text-4xl */
+            color: #63b3ed;
+            font-size: 2.25rem;
             font-weight: bold;
+        }
+        /* フォーカス時のアウトラインを非表示にする（キャンバス以外） */
+        *:focus {
+            outline: none;
         }
     </style>
 </head>
 <body>
     <div class="game-container">
-        <h1>物理演算ブロック崩し</h1>
-        <canvas id="gameCanvas"></canvas>
+        <h1 tabindex="-1">物理演算ブロック崩し</h1>
+        <canvas id="gameCanvas" tabindex="0"></canvas>
     </div>
 
     <script>
-        // Canvas とコンテキストの取得
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
 
-        // ゲーム設定
-        const CANVAS_WIDTH = 600; // 縮小されたキャンバス幅
-        const CANVAS_HEIGHT = 450; // 縮小されたキャンバス高さ
+        // ページロード時にキャンバスにフォーカスを合わせる
+        document.addEventListener('DOMContentLoaded', () => {
+            canvas.focus();
+        });
+
+        // クリック時にもキャンバスにフォーカスを合わせる
+        document.addEventListener('click', () => {
+            canvas.focus();
+        });
+        
+        // キーボードのデフォルト動作（スクロールなど）を無効化
+        document.addEventListener('keydown', (e) => {
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
+                e.preventDefault();
+            }
+        });
+
+
+        const CANVAS_WIDTH = 600;
+        const CANVAS_HEIGHT = 450;
         canvas.width = CANVAS_WIDTH;
         canvas.height = CANVAS_HEIGHT;
 
         const PADDLE_HEIGHT = 20;
         const PADDLE_WIDTH_INITIAL = 100;
-        const PADDLE_SPEED = 5; // パドル速度をピクセル/フレームに調整
+        const PADDLE_SPEED_INITIAL = 5;
+        const PADDLE_SPEED_MAX = 15;
 
-        const BALL_RADIUS = 7; // ボールの半径を小さく
-        const BALL_SPEED_INITIAL = 5.0; // ボールの初期速度の基準
-        const MAX_BALL_SPEED = 10.0; // ボールの最高速度
-        const GRAVITY = 0.04; // 重力加速度をピクセル/フレーム^2に調整
-        const DAMPING_FACTOR = 0.99; // 減衰係数 (衝突時の速度減少) - 壁やブロック用
-        const PADDLE_RESTITUTION_FACTOR = 1.5; // この値は直接速度計算には使われず、MAX_BALL_SPEEDで制限される
+        const BALL_RADIUS = 7;
+        const BALL_SPEED_INITIAL = 5.0;
+        const MAX_BALL_SPEED = 10.0;
+        const GRAVITY = 0.04;
+        const DAMPING_FACTOR = 0.99;
+        const PADDLE_RESTITUTION_FACTOR = 1.5;
 
-        const BLOCK_ROW_COUNT = 7; // ブロックの行数を増やす
-        const BLOCK_COLUMN_COUNT = 10; // ブロックの列数を増やす
-        const BLOCK_PADDING = 0; // ブロック間のパディングをなくす
-        const BLOCK_WIDTH = CANVAS_WIDTH / BLOCK_COLUMN_COUNT; // ブロックの幅を隙間なく配置
-        const BLOCK_HEIGHT = 20; // ブロックの高さを調整
-        const BLOCK_OFFSET_TOP = 20; // ブロックの配置開始Y座標を調整
-        const BLOCK_OFFSET_LEFT = 0; // ブロックの配置開始X座標を調整
+        const BLOCK_ROW_COUNT = 7;
+        const BLOCK_COLUMN_COUNT = 10;
+        const BLOCK_PADDING = 0;
+        const BLOCK_WIDTH = CANVAS_WIDTH / BLOCK_COLUMN_COUNT;
+        const BLOCK_HEIGHT = 20;
+        const BLOCK_OFFSET_TOP = 20;
+        const BLOCK_OFFSET_LEFT = 0;
 
         const POWERUP_SIZE = 20;
-        const POWERUP_SPEED = 2; // パワーアップ速度をピクセル/フレームに調整
+        const POWERUP_SPEED = 2;
 
-        const ELECTROMAGNETIC_FORCE_CONSTANT = 0; // 電磁気力の係数を0に設定し、実質無効化
+        const ELECTROMAGNETIC_FORCE_CONSTANT = 0;
 
-        // ゲームオブジェクトの定義
         let paddle = {
             x: (CANVAS_WIDTH - PADDLE_WIDTH_INITIAL) / 2,
-            y: CANVAS_HEIGHT - PADDLE_HEIGHT - 30, // パドルの位置を画面下端から30px上に調整
+            y: CANVAS_HEIGHT - PADDLE_HEIGHT - 30,
             width: PADDLE_WIDTH_INITIAL,
             height: PADDLE_HEIGHT,
-            dx: 0 // パドルの移動速度 (前フレームとの差分)
+            dx: 0,
+            speed: PADDLE_SPEED_INITIAL
         };
 
-        // ボールは複数になる可能性があるため配列で管理
-        let balls = []; 
-
-        let blocks = []; // ブロックを格納する配列
-        let powerups = []; // パワーアップアイテムを格納する配列
+        let balls = [];
+        let blocks = [];
+        let powerups = [];
         let score = 0;
         let lives = 3;
-        let gameStarted = false; // ゲームが開始されたかどうかのフラグ
+        let gameStarted = false;
 
-        // キーボード入力の状態を管理するフラグ
         let rightPressed = false;
         let leftPressed = false;
 
-        // イベントリスナーの設定
-        document.addEventListener('keydown', keyDownHandler, false); // キーが押された時
-        document.addEventListener('keyup', keyUpHandler, false);     // キーが離された時
-        document.addEventListener('mousemove', mouseMoveHandler, false); // マウス移動でパドルを動かす
-        canvas.addEventListener('click', handleCanvasClick, false); // クリックイベントを一本化
-
-        // タッチイベントリスナーを追加
+        // キーイベントリスナーをcanvas自体に設定
+        canvas.addEventListener('keydown', keyDownHandler, false);
+        canvas.addEventListener('keyup', keyUpHandler, false);
+        // マウスとタッチイベントは元々あったものをそのまま利用
+        canvas.addEventListener('mousemove', mouseMoveHandler, false);
+        canvas.addEventListener('click', handleCanvasClick, false);
         canvas.addEventListener('touchstart', touchStartHandler, false);
         canvas.addEventListener('touchmove', touchMoveHandler, false);
         canvas.addEventListener('touchend', touchEndHandler, false);
 
-        let lastTouchX = 0; // タッチ移動の開始X座標を記録
-        let touchActive = false; // タッチがアクティブかどうかのフラグ
+        // タップでもスタートできるように
+        canvas.addEventListener('touchstart', function(e) { handleCanvasClick(); }, false);
 
-        // キーが押された時の処理
+        // スペースキーでもスタート・打ち出しできるように
+        document.addEventListener('keydown', function(e) {
+            if (!gameStarted && (e.code === 'Space' || e.key === ' ')) {
+                if (lives > 0) startGame();
+                else restartGame();
+            }
+        });
+
+        let lastTouchX = 0;
+        let touchActive = false;
+
         function keyDownHandler(e) {
             if (e.key === 'Right' || e.key === 'ArrowRight') {
                 rightPressed = true;
@@ -131,7 +155,6 @@
             }
         }
 
-        // キーが離された時の処理
         function keyUpHandler(e) {
             if (e.key === 'Right' || e.key === 'ArrowRight') {
                 rightPressed = false;
@@ -140,155 +163,122 @@
             }
         }
 
-        // マウス移動でパドルを動かす処理
+        // マウス移動でパドルを一定速度で動かす
         function mouseMoveHandler(e) {
-            // キャンバスに対するマウスの相対X座標を計算
             const relativeX = e.clientX - canvas.offsetLeft;
-            // マウスがキャンバス内にいる場合のみパドルを動かす
             if (relativeX > 0 && relativeX < CANVAS_WIDTH) {
-                // パドルの中央がマウスの位置に来るように調整
-                paddle.x = relativeX - paddle.width / 2;
-                // パドルが画面外に出ないように制限
-                if (paddle.x < 0) {
-                    paddle.x = 0;
-                }
-                if (paddle.x + paddle.width > CANVAS_WIDTH) {
-                    paddle.x = CANVAS_WIDTH - paddle.width;
+                let targetX = relativeX - paddle.width / 2;
+                targetX = Math.max(0, Math.min(CANVAS_WIDTH - paddle.width, targetX));
+                if (Math.abs(targetX - paddle.x) > paddle.speed) {
+                    paddle.x += paddle.speed * Math.sign(targetX - paddle.x);
+                } else {
+                    paddle.x = targetX;
                 }
             }
         }
 
-        // タッチ開始時の処理
         function touchStartHandler(e) {
-            e.preventDefault(); // スクロールを防ぐ
+            e.preventDefault();
             lastTouchX = e.touches[0].clientX - canvas.offsetLeft;
             touchActive = true;
         }
 
-        // タッチ移動時の処理
+        // タッチ移動も一定速度で
         function touchMoveHandler(e) {
-            e.preventDefault(); // スクロールを防ぐ
+            e.preventDefault();
             if (touchActive) {
                 const currentTouchX = e.touches[0].clientX - canvas.offsetLeft;
-                const deltaX = currentTouchX - lastTouchX; // 移動量
-                paddle.x += deltaX; // パドルを移動量分動かす
-                lastTouchX = currentTouchX; // 次のフレームのために現在の位置を保存
-
-                // パドルが画面外に出ないように制限
-                if (paddle.x < 0) {
-                    paddle.x = 0;
+                let targetX = paddle.x + (currentTouchX - lastTouchX);
+                targetX = Math.max(0, Math.min(CANVAS_WIDTH - paddle.width, targetX));
+                if (Math.abs(targetX - paddle.x) > paddle.speed) {
+                    paddle.x += paddle.speed * Math.sign(targetX - paddle.x);
+                } else {
+                    paddle.x = targetX;
                 }
-                if (paddle.x + paddle.width > CANVAS_WIDTH) {
-                    paddle.x = CANVAS_WIDTH - paddle.width;
-                }
+                lastTouchX = currentTouchX;
             }
         }
 
-        // タッチ終了時の処理
         function touchEndHandler(e) {
             touchActive = false;
         }
 
-        // クリックイベントハンドラを一本化
         function handleCanvasClick() {
-            if (!gameStarted) { // ゲームが開始されていない状態（初期画面またはミス/ゲームオーバー後）
-                if (lives > 0) { // 残機がある場合 (スタート画面またはミス後の再開)
-                    startGame(); // ゲーム開始または再開
-                } else { // 残機がない場合（ゲームオーバー）
-                    restartGame(); // ゲームをリスタート
+            if (!gameStarted) {
+                if (lives > 0) {
+                    startGame();
+                } else {
+                    restartGame();
                 }
             }
         }
 
-        // ボールの状態をリセットする関数
-        // isLaunchingがtrueの場合、BALL_SPEED_INITIALに基づいて速度を設定し打ち出す準備をする
-        // isLaunchingがfalseの場合、ボールを静止させる
         function resetBall(isLaunching) {
-            balls = []; // 既存のボールをすべてクリア
-
+            balls = [];
             const newBall = {
                 x: paddle.x + paddle.width / 2,
                 y: paddle.y - BALL_RADIUS,
                 radius: BALL_RADIUS,
                 vx: 0,
                 vy: 0,
-                hitsOnPaddle: 0 // パドルに当たった回数をリセット
+                hitsOnPaddle: 0
             };
-
             if (isLaunching) {
-                // 初期打ち出し角度にランダム性を加える
-                // Math.PI / 2 は真上。そこから左右約22.5度 (0.25ラジアン) の範囲でランダムに調整
                 const angle = Math.PI / 2 + (Math.random() * 0.5 - 0.25);
-                // 速度はピクセル/フレームで設定
                 newBall.vx = BALL_SPEED_INITIAL * Math.cos(angle);
-                newBall.vy = -BALL_SPEED_INITIAL * Math.sin(angle); // 上向きに発射
+                newBall.vy = -BALL_SPEED_INITIAL * Math.sin(angle);
             }
-            balls.push(newBall); // 新しいボールを配列に追加
+            balls.push(newBall);
         }
 
-        // ゲーム開始処理
         function startGame() {
             gameStarted = true;
-            resetBall(true); // ボールを打ち出すモードでリセット
-            // draw() は requestAnimationFrame で呼ばれるので、ここでは直接呼ばない
+            resetBall(true);
         }
 
-        // ブロックの初期化
         function initBlocks() {
-            blocks = []; // ブロック配列をクリア
+            blocks = [];
             for (let c = 0; c < BLOCK_COLUMN_COUNT; c++) {
                 for (let r = 0; r < BLOCK_ROW_COUNT; r++) {
-                    const blockX = c * BLOCK_WIDTH + BLOCK_OFFSET_LEFT; // 隙間なく配置
-                    const blockY = r * BLOCK_HEIGHT + BLOCK_OFFSET_TOP; // 隙間なく配置
-                    
-                    // 耐久値をランダムに設定 (1, 2, 3)
+                    const blockX = c * BLOCK_WIDTH + BLOCK_OFFSET_LEFT;
+                    const blockY = r * BLOCK_HEIGHT + BLOCK_OFFSET_TOP;
                     const hits = Math.floor(Math.random() * 3) + 1;
                     let color;
                     switch (hits) {
-                        case 1:
-                            color = '#4299e1'; // 青 (1ヒットで破壊)
-                            break;
-                        case 2:
-                            color = '#3182ce'; // 少し濃い青 (2ヒットで破壊)
-                            break;
-                        case 3:
-                            color = '#2b6cb0'; // さらに濃い青 (3ヒットで破壊)
-                            break;
-                        default:
-                            color = '#4299e1';
+                        case 1: color = '#4299e1'; break;
+                        case 2: color = '#3182ce'; break;
+                        case 3: color = '#2b6cb0'; break;
+                        default: color = '#4299e1';
                     }
-
                     blocks.push({
                         x: blockX,
                         y: blockY,
                         width: BLOCK_WIDTH,
                         height: BLOCK_HEIGHT,
-                        status: 1, // 1: 存在, 0: 破壊済み
-                        hits: hits, // 耐久値を追加
-                        isMagnetic: false, // 磁気ブロックを無効化
-                        color: color // 耐久値に応じた色
+                        status: 1,
+                        hits: hits,
+                        isMagnetic: false,
+                        color: color
                     });
                 }
             }
         }
 
-        // ゲームの描画ループ
         function draw() {
-            // 画面をクリア
             ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+            
+            // updatePaddle() を drawPaddle() の前に呼び出すことで、
+            // パドルの位置を更新してから描画する
+            updatePaddle();
 
-            // 各要素を描画
             drawPaddle();
-            // ゲームが開始されていない場合、ボールをパドルに追従させる
-            if (!gameStarted) {
-                // ボールが配列になったため、最初のボールのX,Yを更新
-                if (balls.length > 0) {
-                    balls[0].x = paddle.x + paddle.width / 2;
-                    balls[0].y = paddle.y - balls[0].radius;
-                }
+            
+            if (!gameStarted && balls.length > 0) {
+                // パドルの位置が更新された後にボールの位置を同期させる
+                balls[0].x = paddle.x + paddle.width / 2;
+                balls[0].y = paddle.y - balls[0].radius;
             }
-            // ゲームが開始されているか、またはゲーム開始前でボールがパドル上に静止している場合のみボールを描画
-            // ボール配列の要素数が0でないことを確認
+
             if (balls.length > 0 && (gameStarted || (balls[0].vy === 0 && balls[0].vx === 0))) {
                 drawBall();
             }
@@ -297,446 +287,340 @@
             drawScore();
             drawLives();
 
-            // ゲームの状態更新はゲームが開始されている場合のみ
             if (gameStarted) {
-                updatePaddle();
                 updateBall();
                 collisionDetection();
                 updatePowerups();
             }
 
-            // ゲームの状態に応じた画面表示
             if (!gameStarted) {
-                if (lives <= 0) { // ゲームオーバー状態
+                if (lives <= 0) {
                     drawGameOver();
-                } else if (blocks.every(b => b.status === 0)) { // ゲームクリア状態
+                } else if (blocks.every(b => b.status === 0)) {
                     drawWinScreen();
-                } else { // 初期画面またはミス後の再開待ち状態
+                } else {
                     drawStartScreen();
                 }
             }
-            
-            requestAnimationFrame(draw); // 次のフレームを要求し、描画ループを常に継続
+            requestAnimationFrame(draw);
         }
 
-        // パドルの描画
         function drawPaddle() {
             ctx.beginPath();
-            ctx.roundRect(paddle.x, paddle.y, paddle.width, paddle.height, 8); // 角丸の長方形を描画
-            ctx.fillStyle = '#a0aec0'; // 灰色
+            ctx.roundRect(paddle.x, paddle.y, paddle.width, paddle.height, 8);
+            ctx.fillStyle = '#a0aec0';
             ctx.fill();
             ctx.closePath();
         }
 
-        // ボールの描画
         function drawBall() {
             balls.forEach(b => {
                 ctx.beginPath();
-                ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2); // 円を描画
-                ctx.fillStyle = '#f6e05e'; // 黄色
+                ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+                ctx.fillStyle = '#f6e05e';
                 ctx.fill();
                 ctx.closePath();
             });
         }
 
-        // ブロックの描画
         function drawBlocks() {
-            // ブロック配列をループして描画
             for (let c = 0; c < BLOCK_COLUMN_COUNT; c++) {
                 for (let r = 0; r < BLOCK_ROW_COUNT; r++) {
-                    const block = blocks[c * BLOCK_ROW_COUNT + r]; // 正しいインデックスでブロックを取得
-                    if (block.status === 1) { // ブロックが存在する場合のみ描画
+                    const block = blocks[c * BLOCK_ROW_COUNT + r];
+                    if (block.status === 1) {
                         ctx.beginPath();
-                        ctx.roundRect(block.x, block.y, block.width, block.height, 5); // 角丸の長方形を描画
-                        ctx.fillStyle = block.color; // ブロックの色
+                        ctx.roundRect(block.x, block.y, block.width, block.height, 5);
+                        ctx.fillStyle = block.color;
                         ctx.fill();
-                        
-                        // ブロックの縁を描画
-                        ctx.strokeStyle = '#1a202c'; // 黒に近い色
-                        ctx.lineWidth = 1; // 線の太さ
+                        ctx.strokeStyle = '#1a202c';
+                        ctx.lineWidth = 1;
                         ctx.stroke();
-
                         ctx.closePath();
                     }
                 }
             }
         }
 
-        // パワーアップアイテムの描画
         function drawPowerups() {
             powerups.forEach(p => {
                 ctx.beginPath();
-                ctx.roundRect(p.x, p.y, p.size, p.size, 5); // 角丸の正方形を描画
-                ctx.fillStyle = p.color; // パワーアップの色
+                ctx.roundRect(p.x, p.y, p.size, p.size, 5);
+                ctx.fillStyle = p.color;
                 ctx.fill();
                 ctx.closePath();
             });
         }
 
-        // スコアの描画
         function drawScore() {
             ctx.font = '16px "Inter"';
             ctx.fillStyle = '#e2e8f0';
             ctx.fillText('Score: ' + score, 8, 20);
         }
 
-        // 残機数の描画
         function drawLives() {
             ctx.font = '16px "Inter"';
             ctx.fillStyle = '#e2e8f0';
             ctx.fillText('Lives: ' + lives, CANVAS_WIDTH - 80, 20);
         }
 
-        // スタート画面の描画
         function drawStartScreen() {
             ctx.font = '30px "Inter"';
             ctx.fillStyle = '#63b3ed';
             ctx.textAlign = 'center';
-            ctx.fillText('クリックでスタート', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 20);
+            ctx.fillText('クリック・タップ・スペースでスタート', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 20);
             ctx.font = '20px "Inter"';
             ctx.fillStyle = '#e2e8f0';
-            ctx.fillText('マウスまたはスワイプでパドルを動かせます', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 20);
-            ctx.textAlign = 'left'; // テキストアラインメントをリセット
+            ctx.fillText('矢印キー・マウス・スワイプでパドル操作', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 20);
+            ctx.textAlign = 'left';
         }
 
-        // ゲームオーバー画面の描画
         function drawGameOver() {
             ctx.font = '40px "Inter"';
-            ctx.fillStyle = '#e53e3e'; // 赤色
+            ctx.fillStyle = '#e53e3e';
             ctx.textAlign = 'center';
             ctx.fillText('ゲームオーバー', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 20);
             ctx.font = '20px "Inter"';
             ctx.fillStyle = '#e2e8f0';
             ctx.fillText('スコア: ' + score, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 20);
-            ctx.fillText('クリックでリスタート', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 60);
-            ctx.textAlign = 'left'; // テキストアラインメントをリセット
+            ctx.fillText('クリック・タップ・スペースでリスタート', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 60);
+            ctx.textAlign = 'left';
         }
 
-        // 勝利画面の描画
         function drawWinScreen() {
             ctx.font = '40px "Inter"';
-            ctx.fillStyle = '#48bb78'; // 緑色
+            ctx.fillStyle = '#48bb78';
             ctx.textAlign = 'center';
             ctx.fillText('ゲームクリア！', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 20);
             ctx.font = '20px "Inter"';
             ctx.fillStyle = '#e2e8f0';
             ctx.fillText('スコア: ' + score, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 20);
-            ctx.fillText('クリックでリスタート', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 60);
-            ctx.textAlign = 'left'; // テキストアラインメントをリセット
+            ctx.fillText('クリック・タップ・スペースでリスタート', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 60);
+            ctx.textAlign = 'left';
         }
 
-        // ゲームのリスタート処理
         function restartGame() {
             score = 0;
             lives = 3;
-            paddle.width = PADDLE_WIDTH_INITIAL; // パドル幅を初期値にリセット
-            initBlocks(); // ブロックを再初期化
-            powerups = []; // パワーアップアイテムをクリア
-            gameStarted = false; // ゲーム開始フラグをリセット
-            resetBall(false); // ボールをパドル上で静止させるモードでリセット
-            // draw() は requestAnimationFrame で呼ばれるので、ここでは直接呼ばない
+            paddle.width = PADDLE_WIDTH_INITIAL;
+            paddle.speed = PADDLE_SPEED_INITIAL;
+            initBlocks();
+            powerups = [];
+            gameStarted = false;
+            resetBall(false);
         }
 
-        // パドルの位置を更新
+        // パドルの位置を更新（矢印キーでスタート前も動かせる）
         function updatePaddle() {
-            const prevPaddleX = paddle.x; // 現在のX座標を保存
+            const prevPaddleX = paddle.x;
             if (rightPressed && paddle.x < CANVAS_WIDTH - paddle.width) {
-                paddle.x += PADDLE_SPEED;
+                paddle.x += paddle.speed;
             } else if (leftPressed && paddle.x > 0) {
-                paddle.x -= PADDLE_SPEED;
+                paddle.x -= paddle.speed;
             }
-            // パドルが画面外に出ないように制限
-            if (paddle.x < 0) {
-                paddle.x = 0;
-            }
-            if (paddle.x + paddle.width > CANVAS_WIDTH) {
-                paddle.x = CANVAS_WIDTH - paddle.width;
-            }
-            // パドルの移動速度 (ピクセル/フレーム) を計算
+            if (paddle.x < 0) paddle.x = 0;
+            if (paddle.x + paddle.width > CANVAS_WIDTH) paddle.x = CANVAS_WIDTH - paddle.width;
             paddle.dx = paddle.x - prevPaddleX;
         }
 
-        // ボールの位置と速度を更新 (物理演算を含む)
         function updateBall() {
-            const nextBalls = []; // 次のフレームに引き継ぐボールを格納する配列
-
+            const nextBalls = [];
             for (let i = 0; i < balls.length; i++) {
                 const b = balls[i];
-
-                // 電磁気力 (磁気ブロックからの引力/斥力) を適用 (ELECTROMAGNETIC_FORCE_CONSTANTが0なので無効)
                 blocks.forEach(block => {
                     if (block.status === 1 && block.isMagnetic) {
                         const blockCenterX = block.x + block.width / 2;
                         const blockCenterY = block.y + block.height / 2;
-
-                        const dx = blockCenterX - b.x; // ボールからブロック中心までのX距離
-                        const dy = blockCenterY - b.y; // ボールからブロック中心までのY距離
-                        const distanceSq = dx * dx + dy * dy; // 距離の2乗
-
-                        // ボールとブロックが近すぎると力が無限大になるのを防ぐための最小距離
+                        const dx = blockCenterX - b.x;
+                        const dy = blockCenterY - b.y;
+                        const distanceSq = dx * dx + dy * dy;
                         const minDistanceSq = (block.width / 2 + b.radius) * (block.width / 2 + b.radius);
                         const effectiveDistanceSq = Math.max(distanceSq, minDistanceSq);
-
-                        // 距離の逆二乗に比例する力 (引力として作用)
                         const forceMagnitude = ELECTROMAGNETIC_FORCE_CONSTANT / effectiveDistanceSq;
-
-                        // 力の方向ベクトルに力を乗算して速度に加算
                         b.vx += dx * forceMagnitude;
                         b.vy += dy * forceMagnitude;
                     }
                 });
-
-                // 重力加速度を適用: Y方向の速度を増加させる
                 b.vy += GRAVITY;
-
-                // 速度に基づいてボールの位置を更新
                 b.x += b.vx;
                 b.y += b.vy;
 
-                // 壁との衝突判定と跳ね返り
-                // 右壁との衝突
                 if (b.x + b.radius > CANVAS_WIDTH) {
-                    b.x = CANVAS_WIDTH - b.radius; // ボールを壁の内側に調整
-                    b.vx *= -1 * DAMPING_FACTOR; // X方向の速度を反転し、減衰を適用
+                    b.x = CANVAS_WIDTH - b.radius;
+                    b.vx *= -1 * DAMPING_FACTOR;
                 }
-                // 左壁との衝突
                 if (b.x - b.radius < 0) {
-                    b.x = b.radius; // ボールを壁の内側に調整
-                    b.vx *= -1 * DAMPING_FACTOR; // X方向の速度を反転し、減衰を適用
+                    b.x = b.radius;
+                    b.vx *= -1 * DAMPING_FACTOR;
                 }
-                // 上壁との衝突
                 if (b.y - b.radius < 0) {
-                    b.y = b.radius; // ボールを壁の内側に調整
-                    b.vy *= -1 * DAMPING_FACTOR; // Y方向の速度を反転し、減衰を適用
+                    b.y = b.radius;
+                    b.vy *= -1 * DAMPING_FACTOR;
                 }
 
-                // パドルとの衝突判定
                 if (
                     b.y + b.radius > paddle.y &&
                     b.y - b.radius < paddle.y + paddle.height &&
                     b.x + b.radius > paddle.x &&
                     b.x - b.radius < paddle.x + paddle.width
                 ) {
-                    // ボールがパドルの上部に当たった場合のみ跳ね返す
                     if (b.vy > 0 && b.y < paddle.y + b.radius) {
-                        b.y = paddle.y - b.radius; // パドルの上に位置を調整してめり込みを防ぐ
-
-                        b.hitsOnPaddle++; // パドルに当たった回数をインクリメント
-
-                        // お客様の漸近加速式に基づいて新しい目標速度を計算
-                        // 新しい目標速度 = MAX_BALL_SPEED - (MAX_BALL_SPEED - BALL_SPEED_INITIAL) / (hitsOnPaddle + 1)
-                        let newTargetSpeed = MAX_BALL_SPEED - (MAX_BALL_SPEED - BALL_SPEED_INITIAL) / (b.hitsOnPaddle + 1);
-                        
-                        // 初期速度を下回らないように、また最高速度を超えないように制限
-                        newTargetSpeed = Math.max(newTargetSpeed, BALL_SPEED_INITIAL);
-                        newTargetSpeed = Math.min(newTargetSpeed, MAX_BALL_SPEED);
-
-
-                        // パドルに当たった位置に基づいてX方向の速度を決定
-                        // hitPointはパドルの左端で-1、中央で0、右端で1となる値
-                        const hitPoint = (b.x - (paddle.x + paddle.width / 2)) / (paddle.width / 2);
-                        // hitPointを-1から1の範囲にクランプ
-                        const clampedHitPoint = Math.max(-1, Math.min(1, hitPoint));
-                        
-                        // 基本のX方向速度 (パドル静止時)
-                        const baseVx = clampedHitPoint * newTargetSpeed * 0.8; // Max 80% of newTargetSpeed for X
-
-                        // パドルの速度をボールのX速度に加算
-                        // パドルの速度の影響度を調整する係数
-                        const paddleInfluence = 0.5;
-                        let newVx = baseVx + paddle.dx * paddleInfluence;
-
-                        // 新しいX速度が新しい目標速度を超えないようにクランプ
-                        newVx = Math.max(-newTargetSpeed, Math.min(newTargetSpeed, newVx));
-
-                        // Y方向の速度を、X方向の速度と新しい目標速度から計算（ピタゴラスの定理）
-                        // 常に上方向（負の値）になるようにする
-                        let newVy = -Math.sqrt(newTargetSpeed * newTargetSpeed - newVx * newVx);
-
-                        // ボールが水平に近くなりすぎないように、最低限の垂直速度を保証
-                        const minVyComponent = newTargetSpeed * 0.2; // 目標速度の20%を最低垂直速度とする
-                        if (isNaN(newVy) || Math.abs(newVy) < minVyComponent) {
-                            newVy = -minVyComponent; // 強制的に最低限の上向き速度を設定
-                            // 垂直速度を調整したため、X方向の速度も再計算して総速度を維持
-                            newVx = Math.sqrt(newTargetSpeed * newTargetSpeed - newVy * newVy) * (newVx < 0 ? -1 : 1);
+                        b.y = paddle.y - b.radius;
+                        b.hitsOnPaddle++;
+                        const speedIncrement = (MAX_BALL_SPEED - BALL_SPEED_INITIAL) / 10;
+                        let newTargetSpeed;
+                        if (b.hitsOnPaddle <= 10) {
+                             newTargetSpeed = BALL_SPEED_INITIAL + b.hitsOnPaddle * speedIncrement;
+                        } else {
+                             newTargetSpeed = MAX_BALL_SPEED;
                         }
 
+                        const hitPoint = (b.x - (paddle.x + paddle.width / 2)) / (paddle.width / 2);
+                        const clampedHitPoint = Math.max(-1, Math.min(1, hitPoint));
+                        const baseVx = clampedHitPoint * newTargetSpeed * 0.8;
+                        const paddleInfluence = 0.5;
+                        let newVx = baseVx + paddle.dx * paddleInfluence;
+                        newVx = Math.max(-newTargetSpeed, Math.min(newTargetSpeed, newVx));
+                        let newVy = -Math.sqrt(newTargetSpeed * newTargetSpeed - newVx * newVx);
+                        const minVyComponent = newTargetSpeed * 0.2;
+                        if (isNaN(newVy) || Math.abs(newVy) < minVyComponent) {
+                            newVy = -minVyComponent;
+                            newVx = Math.sqrt(newTargetSpeed * newTargetSpeed - newVy * newVy) * (newVx < 0 ? -1 : 1);
+                        }
                         b.vx = newVx;
                         b.vy = newVy;
                     }
                 }
 
-                // ボールが画面下部に落ちた場合
                 if (b.y + b.radius > CANVAS_HEIGHT) {
-                    // このボールは失われたので、nextBallsには追加しない
+                    // ボール消失
                 } else {
-                    nextBalls.push(b); // このボールは次のフレームに引き継ぐ
+                    nextBalls.push(b);
                 }
 
-                // --- 全体的なボールの速度制限 (二重チェックとして残す) ---
                 const currentSpeed = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
-                if (currentSpeed > MAX_BALL_SPEED) { // MAX_BALL_SPEEDで制限
+                if (currentSpeed > MAX_BALL_SPEED) {
                     b.vx = (b.vx / currentSpeed) * MAX_BALL_SPEED;
                     b.vy = (b.vy / currentSpeed) * MAX_BALL_SPEED;
                 }
             }
-            balls = nextBalls; // ボール配列を更新
-
-            // すべてのボールが失われ、かつゲーム中の場合
+            balls = nextBalls;
             if (balls.length === 0 && gameStarted) {
-                lives--; // 残機を減らす
+                lives--;
                 if (lives > 0) {
-                    gameStarted = false; // ゲームを一時停止
-                    resetBall(false); // パドル上にボールを静止させるモードでリセット
+                    gameStarted = false;
+                    resetBall(false);
                 } else {
-                    gameStarted = false; // ゲームオーバー
+                    gameStarted = false;
                 }
             }
         }
 
-        // 衝突判定 (ボールとブロック)
         function collisionDetection() {
             for (let i = 0; i < balls.length; i++) {
-                const ball = balls[i]; // 現在処理中のボール
-                let hitThisFrame = false; // このボールがこのフレームでブロックに当たったかどうかのフラグ
-
+                const ball = balls[i];
+                let hitThisFrame = false;
                 for (let c = 0; c < BLOCK_COLUMN_COUNT; c++) {
                     for (let r = 0; r < BLOCK_ROW_COUNT; r++) {
-                        const block = blocks[c * BLOCK_ROW_COUNT + r]; // 正しいインデックスでブロックを取得
-                        if (block.status === 1) { // ブロックが存在する場合のみ判定
-                            // AABB (Axis-Aligned Bounding Box) と円の衝突判定
-                            // ボールの中心に最も近いブロックの点を見つける
+                        const block = blocks[c * BLOCK_ROW_COUNT + r];
+                        if (block.status === 1) {
                             const testX = Math.max(block.x, Math.min(ball.x, block.x + block.width));
                             const testY = Math.max(block.y, Math.min(ball.y, block.y + block.height));
-
-                            // ボール中心から最も近い点までの距離を計算
                             const distX = ball.x - testX;
                             const distY = ball.y - testY;
                             const distance = Math.sqrt((distX * distX) + (distY * distY));
-
-                            // 距離がボールの半径以下であれば衝突
                             if (distance <= ball.radius) {
-                                // 衝突！
-                                block.hits--; // 耐久値を減らす
+                                block.hits--;
                                 if (block.hits <= 0) {
-                                    block.status = 0; // ブロックを破壊
-                                    score += 10; // スコアを加算
+                                    block.status = 0;
+                                    score += 10;
                                 } else {
-                                    // 耐久値が残っている場合、ブロックの色を更新
                                     switch (block.hits) {
-                                        case 1:
-                                            block.color = '#4299e1'; // 青 (1ヒットで破壊)
-                                            break;
-                                        case 2:
-                                            block.color = '#3182ce'; // 少し濃い青 (2ヒットで破壊)
-                                            break;
-                                        default:
-                                            block.color = '#2b6cb0'; // さらに濃い青 (3ヒットで破壊)
+                                        case 1: block.color = '#4299e1'; break;
+                                        case 2: block.color = '#3182ce'; break;
+                                        default: block.color = '#2b6cb0';
                                     }
                                 }
-
-                                // パワーアップをドロップする確率 (30%の確率でドロップ)
-                                if (Math.random() < 0.3 && block.status === 0) { // ブロックが破壊されたときのみドロップ
-                                    const powerupTypes = ['paddle_enlarge', 'split_ball']; // 分裂アイテムを追加
+                                // パワーアップ追加（加速アイテムも追加）
+                                if (Math.random() < 0.3 && block.status === 0) {
+                                    const powerupTypes = ['paddle_enlarge', 'split_ball', 'paddle_speedup'];
                                     const randomType = powerupTypes[Math.floor(Math.random() * powerupTypes.length)];
                                     powerups.push({
-                                        x: block.x + block.width / 2 - POWERUP_SIZE / 2, // ブロックの中心から生成
+                                        x: block.x + block.width / 2 - POWERUP_SIZE / 2,
                                         y: block.y + block.height / 2 - POWERUP_SIZE / 2,
                                         size: POWERUP_SIZE,
-                                        color: (randomType === 'split_ball' ? '#ff00ff' : '#ecc94b'), // 分裂アイテムはマゼンタ
+                                        color: (randomType === 'split_ball' ? '#ff00ff' : randomType === 'paddle_speedup' ? '#38a169' : '#ecc94b'),
                                         type: randomType
                                     });
                                 }
-
-                                // ボールの跳ね返り方向を決定
-                                // 衝突した面によって速度を反転させる
                                 const overlapX = ball.radius - Math.abs(distX);
                                 const overlapY = ball.radius - Math.abs(distY);
-
-                                if (overlapX > overlapY) { // Y軸方向の衝突 (上下の面)
+                                if (overlapX > overlapY) {
                                     ball.vy *= -1;
-                                    // 衝突時のめり込み防止のため、ボールの位置を少し調整
                                     ball.y += ball.vy;
-                                } else { // X軸方向の衝突 (左右の面)
+                                } else {
                                     ball.vx *= -1;
-                                    // 衝突時のめり込み防止のため、ボールの位置を少し調整
                                     ball.x += ball.vx;
                                 }
-                                hitThisFrame = true; // このボールはブロックに当たった
-                                break; // このボールはこれ以上ブロックをチェックしない
+                                hitThisFrame = true;
+                                break;
                             }
                         }
                     }
-                    if (hitThisFrame) {
-                        break; // このボールがブロックに当たったので、次の列のブロックもチェックしない
-                    }
+                    if (hitThisFrame) break;
                 }
             }
         }
 
-        // パワーアップアイテムの更新
         function updatePowerups() {
-            // 後ろからループすることで、spliceで要素を削除してもインデックスがずれないようにする
             for (let i = powerups.length - 1; i >= 0; i--) {
                 const p = powerups[i];
-                p.y += POWERUP_SPEED; // 下に移動
-
-                // パドルとの衝突判定 (AABB衝突)
+                p.y += POWERUP_SPEED;
                 if (
                     p.y + p.size > paddle.y &&
                     p.y < paddle.y + paddle.height &&
                     p.x + p.size > paddle.x &&
                     p.x < paddle.x + paddle.width
                 ) {
-                    // パワーアップの効果を適用
                     if (p.type === 'paddle_enlarge') {
-                        paddle.width = Math.min(paddle.width + 30, CANVAS_WIDTH * 0.8); // パドル幅を広げる (最大幅を制限)
+                        paddle.width = Math.min(paddle.width + 30, CANVAS_WIDTH * 0.8);
                     } else if (p.type === 'split_ball') {
-                        const ballsToAdd = []; // 新しく生成するボールを一時的に保持
-                        const currentBallsCount = balls.length; // 現在のボールの数を取得
-
-                        // 既存の各ボールから2つの新しいボールを生成
+                        const ballsToAdd = [];
+                        const currentBallsCount = balls.length;
                         for (let j = 0; j < currentBallsCount; j++) {
                             const originalBall = balls[j];
-                            // 新しいボールは初期速度から加速を開始
-                            const angleOffset = Math.PI / 10; // 約18度の角度差
-
-                            // 最初の新しいボール
+                            const angleOffset = Math.PI / 10;
                             ballsToAdd.push({
                                 x: originalBall.x,
                                 y: originalBall.y,
                                 radius: BALL_RADIUS,
                                 vx: BALL_SPEED_INITIAL * Math.cos(Math.atan2(originalBall.vy, originalBall.vx) + angleOffset),
                                 vy: BALL_SPEED_INITIAL * Math.sin(Math.atan2(originalBall.vy, originalBall.vx) + angleOffset),
-                                hitsOnPaddle: 0 // 新しいボールはヒットカウントをリセット
+                                hitsOnPaddle: 0
                             });
-                            // 2番目の新しいボール
                             ballsToAdd.push({
                                 x: originalBall.x,
                                 y: originalBall.y,
                                 radius: BALL_RADIUS,
                                 vx: BALL_SPEED_INITIAL * Math.cos(Math.atan2(originalBall.vy, originalBall.vx) - angleOffset),
                                 vy: BALL_SPEED_INITIAL * Math.sin(Math.atan2(originalBall.vy, originalBall.vx) - angleOffset),
-                                hitsOnPaddle: 0 // 新しいボールはヒットカウントをリセット
+                                hitsOnPaddle: 0
                             });
                         }
-                        // 新しく生成したボールをメインのボール配列に追加
                         balls.push(...ballsToAdd);
+                    } else if (p.type === 'paddle_speedup') {
+                        paddle.speed = Math.min(paddle.speed + 2, PADDLE_SPEED_MAX);
                     }
-                    powerups.splice(i, 1); // パワーアップを削除
+                    powerups.splice(i, 1);
                 }
-
-                // 画面外に出たら削除
                 if (p.y > CANVAS_HEIGHT) {
                     powerups.splice(i, 1);
                 }
             }
         }
 
-        // ゲームの初期化処理
-        initBlocks(); // ブロックを初期配置
-        resetBall(false); // 初回はボールを静止させてパドル上に配置
-        requestAnimationFrame(draw); // 初回描画ループを開始
+        initBlocks();
+        resetBall(false);
+        requestAnimationFrame(draw);
     </script>
 </body>
 </html>
