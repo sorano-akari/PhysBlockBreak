@@ -1,0 +1,1033 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>物理演算ブロック崩し</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #1a202c;
+            color: #e2e8f0;
+            margin: 0;
+            overflow: hidden;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .main-container {
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+        }
+        .game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            border-radius: 16px;
+            background-color: #2d3748;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            position: relative;
+        }
+        canvas {
+            background-color: #2d3748;
+            border-radius: 12px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            display: block;
+            outline: none;
+        }
+        h1 {
+            color: #63b3ed;
+            font-size: 2.25rem;
+            font-weight: bold;
+        }
+        *:focus {
+            outline: none;
+        }
+        .editor-panel {
+            width: 300px;
+            background-color: #2d3748;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .hidden {
+            display: none;
+        }
+        .editor-panel h2 {
+            font-size: 1.5rem;
+            font-weight: bold;
+            text-align: center;
+        }
+        .editor-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .editor-controls button, .editor-controls label {
+            background-color: #4c51bf;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            text-align: center;
+        }
+        .editor-controls button:hover, .editor-controls label:hover {
+            background-color: #667eea;
+        }
+        .block-picker {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-top: 15px;
+            justify-content: center;
+        }
+        .block-tile {
+            width: 25px;
+            height: 25px;
+            border-radius: 4px;
+            border: 2px solid transparent;
+            cursor: pointer;
+            transition: transform 0.1s, border-color 0.2s;
+        }
+        .block-tile:hover {
+            transform: scale(1.1);
+        }
+        .block-tile.selected {
+            border-color: #e2e8f0;
+            transform: scale(1.1);
+        }
+    </style>
+</head>
+<body>
+    <h1>物理演算ブロック崩し</h1>
+    <div class="main-container">
+        <div class="game-container">
+            <canvas id="gameCanvas" tabindex="0"></canvas>
+        </div>
+        <div id="editorPanel" class="editor-panel hidden">
+            <h2>ステージエディタ</h2>
+            <div class="editor-controls">
+                <p class="text-center text-sm mb-2">選択中のタイルでクリック＆ドラッグしてブロックを配置/削除</p>
+                <div class="block-picker" id="editorBlockPicker"></div>
+                <button id="saveStageToFileButton">ステージをファイルに保存</button>
+                <label class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded transition-colors duration-200 cursor-pointer text-center">
+                    ファイルからステージを読み込み
+                    <input type="file" id="loadStageFromFileInput" class="hidden" accept=".json">
+                </label>
+                <button id="exitEditorButton">ゲームモードに戻る</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const editorPanel = document.getElementById('editorPanel');
+        const editorBlockPicker = document.getElementById('editorBlockPicker');
+        const saveStageToFileButton = document.getElementById('saveStageToFileButton');
+        const loadStageFromFileInput = document.getElementById('loadStageFromFileInput');
+        const exitEditorButton = document.getElementById('exitEditorButton');
+
+        document.addEventListener('DOMContentLoaded', () => {
+            canvas.focus();
+            exitEditorButton.addEventListener('click', toggleEditorMode);
+            saveStageToFileButton.addEventListener('click', saveStageToFile);
+            loadStageFromFileInput.addEventListener('change', loadStageFromFile);
+        });
+        
+        document.addEventListener('keydown', (e) => {
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key) || e.code === 'Space') {
+                e.preventDefault();
+            }
+
+            if (e.metaKey && (e.key === ' ' || e.code === 'Space')) {
+                e.preventDefault();
+            }
+
+            if (e.key === 'E') {
+                toggleEditorMode();
+            }
+            if (!gameStarted && !editorMode && (e.code === 'Space' || e.key === ' ')) {
+                if (lives > 0) startGame();
+                else restartGame();
+            }
+        });
+
+        const CANVAS_WIDTH = 600;
+        const CANVAS_HEIGHT = 450;
+        canvas.width = CANVAS_WIDTH;
+        canvas.height = CANVAS_HEIGHT;
+
+        const PADDLE_HEIGHT = 20;
+        const PADDLE_WIDTH_INITIAL = 100;
+        const PADDLE_SPEED_INITIAL = 10;
+        const PADDLE_SPEED_MAX = 20;
+
+        const BALL_RADIUS = 7;
+        const BALL_SPEED_INITIAL = 5.0;
+        const MAX_BALL_SPEED = 10.0;
+        const GRAVITY = 0.04;
+        const DAMPING_FACTOR = 0.99;
+
+        const BLOCK_ROW_COUNT = 5;
+        const BLOCK_COLUMN_COUNT = 10;
+        const BLOCK_WIDTH = CANVAS_WIDTH / BLOCK_COLUMN_COUNT;
+        const BLOCK_HEIGHT = 20;
+        const BLOCK_OFFSET_TOP = 50;
+        const BLOCK_OFFSET_LEFT = 0;
+
+        const POWERUP_SIZE = 20;
+        const POWERUP_SPEED = 2;
+
+        const BASE_COLORS = ['#e53e3e', '#dd6b20', '#d69e2e', '#38a169', '#3182ce', '#4c51bf', '#9f7aea'];
+        const COLOR_PALETTE = [];
+
+        function lightenColor(color, percent) {
+            const f = parseInt(color.slice(1), 16),
+                t = percent < 0 ? 0 : 255,
+                p = percent < 0 ? percent * -1 : percent,
+                R = f >> 16,
+                G = (f >> 8) & 0x00ff,
+                B = f & 0x0000ff;
+            return "#" +
+                (0x1000000 + (Math.round((t - R) * p) + R) * 0x10000 +
+                (Math.round((t - G) * p) + G) * 0x100 +
+                (Math.round((t - B) * p) + B))
+                .toString(16)
+                .slice(1);
+        }
+
+        BASE_COLORS.forEach(baseColor => {
+            COLOR_PALETTE.push([
+                baseColor,
+                lightenColor(baseColor, 0.4),
+                lightenColor(baseColor, 0.7)
+            ]);
+        });
+
+        const TOTAL_STAGES = 5;
+        let currentStageNumber = 1;
+        const ELECTROMAGNETIC_FORCE_CONSTANT = 0;
+
+        let paddle = {
+            x: (CANVAS_WIDTH - PADDLE_WIDTH_INITIAL) / 2,
+            y: CANVAS_HEIGHT - PADDLE_HEIGHT - 30,
+            width: PADDLE_WIDTH_INITIAL,
+            height: PADDLE_HEIGHT,
+            dx: 0,
+            speed: PADDLE_SPEED_INITIAL
+        };
+
+        let balls = [];
+        let blocks = [];
+        let powerups = [];
+        let score = 0;
+        let lives = 3;
+        let gameStarted = false;
+        let editorMode = false;
+        let isDragging = false;
+        let startDragPos = { x: 0, y: 0 };
+        let selectedBlock = {
+            status: 1,
+            hits: 1,
+            isIndestructible: false,
+            colorIndex: 0
+        };
+
+        let rightPressed = false;
+        let leftPressed = false;
+        let lastTouchX = 0;
+        let touchActive = false;
+        let mouseTargetX = null;
+        
+        let unbreakableBlockImage = new Image();
+        unbreakableBlockImage.src = 'unbreakable_block.png';
+
+        function activateGameEventListeners() {
+            canvas.addEventListener('keydown', keyDownHandler, false);
+            canvas.addEventListener('keyup', keyUpHandler, false);
+            canvas.addEventListener('mousemove', mouseMoveHandler, false);
+            canvas.addEventListener('click', handleCanvasClick, false);
+            canvas.addEventListener('touchstart', touchStartHandler, false);
+            canvas.addEventListener('touchmove', touchMoveHandler, false);
+            canvas.addEventListener('touchend', touchEndHandler, false);
+        }
+
+        function activateEditorEventListeners() {
+            canvas.addEventListener('mousedown', editorMouseDownHandler);
+            canvas.addEventListener('mouseup', editorMouseUpHandler);
+        }
+
+        function removeAllEventListeners() {
+            canvas.removeEventListener('keydown', keyDownHandler);
+            canvas.removeEventListener('keyup', keyUpHandler);
+            canvas.removeEventListener('mousemove', mouseMoveHandler);
+            canvas.removeEventListener('click', handleCanvasClick);
+            canvas.removeEventListener('touchstart', touchStartHandler);
+            canvas.removeEventListener('touchmove', touchMoveHandler);
+            canvas.removeEventListener('touchend', touchEndHandler);
+            canvas.removeEventListener('mousedown', editorMouseDownHandler);
+            canvas.removeEventListener('mouseup', editorMouseUpHandler);
+        }
+
+        function setupEditorBlockPicker() {
+            editorBlockPicker.innerHTML = '';
+            
+            let deleteTile = document.createElement('div');
+            deleteTile.className = 'block-tile';
+            deleteTile.style.backgroundColor = '#1a202c';
+            deleteTile.setAttribute('data-status', '0');
+            deleteTile.addEventListener('click', () => selectEditorBlock({ status: 0 }, deleteTile));
+            editorBlockPicker.appendChild(deleteTile);
+
+            let unbreakableTile = document.createElement('div');
+            unbreakableTile.className = 'block-tile';
+            unbreakableTile.style.backgroundColor = '#A9A9A9';
+            unbreakableTile.setAttribute('data-hits', '100');
+            unbreakableTile.setAttribute('data-color-index', '-1');
+            unbreakableTile.setAttribute('data-status', '1');
+            unbreakableTile.addEventListener('click', () => selectEditorBlock({ status: 1, hits: 100, isIndestructible: true, colorIndex: -1 }, unbreakableTile));
+            editorBlockPicker.appendChild(unbreakableTile);
+            
+            for (let r = 0; r < BASE_COLORS.length; r++) {
+                for (let h = 1; h <= 3; h++) {
+                    const tile = document.createElement('div');
+                    tile.className = 'block-tile';
+                    tile.style.backgroundColor = COLOR_PALETTE[r][h - 1];
+                    tile.setAttribute('data-hits', h);
+                    tile.setAttribute('data-color-index', r);
+                    tile.setAttribute('data-status', '1');
+                    tile.addEventListener('click', () => selectEditorBlock({ status: 1, hits: h, isIndestructible: false, colorIndex: r }, tile));
+                    editorBlockPicker.appendChild(tile);
+                }
+            }
+            const firstTile = editorBlockPicker.querySelector('.block-tile[data-hits="1"][data-color-index="0"]');
+            if (firstTile) {
+                selectEditorBlock({ status: 1, hits: 1, isIndestructible: false, colorIndex: 0 }, firstTile);
+            }
+        }
+
+        function selectEditorBlock(block, element) {
+            document.querySelectorAll('.block-tile').forEach(el => el.classList.remove('selected'));
+            if (element) {
+                element.classList.add('selected');
+            }
+            selectedBlock = block;
+        }
+
+        async function toggleEditorMode() {
+            editorMode = !editorMode;
+            removeAllEventListeners();
+            if (editorMode) {
+                editorPanel.classList.remove('hidden');
+                setupEditorBlockPicker();
+                activateEditorEventListeners();
+                gameStarted = false;
+                lives = 3;
+                score = 0;
+            } else {
+                editorPanel.classList.add('hidden');
+                await restartGame();
+                activateGameEventListeners();
+            }
+        }
+
+        function editorMouseDownHandler(e) {
+            e.preventDefault();
+            
+            const rect = canvas.getBoundingClientRect();
+            startDragPos.x = e.clientX - rect.left;
+            startDragPos.y = e.clientY - rect.top;
+            isDragging = true;
+        }
+
+        function editorMouseUpHandler(e) {
+            if (!isDragging) return;
+            e.preventDefault();
+            isDragging = false;
+
+            const rect = canvas.getBoundingClientRect();
+            const endDragX = e.clientX - rect.left;
+            const endDragY = e.clientY - rect.top;
+
+            let startC = Math.floor(Math.min(startDragPos.x, endDragX) / BLOCK_WIDTH);
+            let endC = Math.floor(Math.max(startDragPos.x, endDragX) / BLOCK_WIDTH);
+            let startR = Math.floor((Math.min(startDragPos.y, endDragY) - BLOCK_OFFSET_TOP) / BLOCK_HEIGHT);
+            let endR = Math.floor((Math.max(startDragPos.y, endDragY) - BLOCK_OFFSET_TOP) / BLOCK_HEIGHT);
+            
+            startC = Math.max(0, startC);
+            endC = Math.min(BLOCK_COLUMN_COUNT - 1, endC);
+            startR = Math.max(0, startR);
+            endR = Math.min(BLOCK_ROW_COUNT - 1, endR);
+
+            for (let c = startC; c <= endC; c++) {
+                for (let r = startR; r <= endR; r++) {
+                    const blockIndex = c * BLOCK_ROW_COUNT + r;
+                    if (blockIndex >= 0 && blockIndex < blocks.length) {
+                        const block = blocks[blockIndex];
+
+                        if (selectedBlock.status === 0) {
+                            block.status = 0;
+                        } else {
+                            block.status = 1;
+                            block.isIndestructible = selectedBlock.isIndestructible;
+                            block.isMagnetic = false;
+                            block.hits = selectedBlock.hits;
+                            block.colorIndex = selectedBlock.colorIndex;
+                            if (!block.isIndestructible) {
+                                block.color = COLOR_PALETTE[block.colorIndex][block.hits - 1];
+                            } else {
+                                block.color = '#A9A9A9';
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        function saveStageToFile() {
+            const stageData = blocks.map(block => ({
+                status: block.status,
+                hits: block.hits,
+                isIndestructible: block.isIndestructible,
+                colorIndex: block.colorIndex
+            }));
+            const dataStr = JSON.stringify(stageData);
+            const blob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `stage_${currentStageNumber.toString().padStart(2, '0')}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function loadStageFromFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const stageData = JSON.parse(e.target.result);
+                    if (stageData.length === blocks.length) {
+                        blocks.forEach((block, index) => {
+                            const savedBlock = stageData[index];
+                            block.status = savedBlock.status;
+                            block.hits = savedBlock.hits;
+                            block.isIndestructible = savedBlock.isIndestructible;
+                            block.colorIndex = savedBlock.colorIndex;
+                            if (block.status === 1) {
+                                block.color = block.isIndestructible ? '#A9A9A9' : COLOR_PALETTE[block.colorIndex][savedBlock.hits - 1];
+                            }
+                        });
+                        alert('ステージが読み込まれました！');
+                    } else {
+                        alert('無効なステージファイルです。');
+                    }
+                } catch (error) {
+                    alert('ファイルの読み込みに失敗しました。');
+                    console.error(error);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function keyDownHandler(e) {
+            if (e.key === 'Right' || e.key === 'ArrowRight') {
+                rightPressed = true;
+                mouseTargetX = null;
+            } else if (e.key === 'Left' || e.key === 'ArrowLeft') {
+                leftPressed = true;
+                mouseTargetX = null;
+            }
+        }
+
+        function keyUpHandler(e) {
+            if (e.key === 'Right' || e.key === 'ArrowRight') {
+                rightPressed = false;
+            } else if (e.key === 'Left' || e.key === 'ArrowLeft') {
+                leftPressed = false;
+            }
+        }
+        
+        function mouseMoveHandler(e) {
+            const rect = canvas.getBoundingClientRect();
+            const relativeX = e.clientX - rect.left;
+            if (relativeX > 0 && relativeX < CANVAS_WIDTH) {
+                mouseTargetX = relativeX - paddle.width / 2;
+            }
+        }
+
+        function touchStartHandler(e) {
+            e.preventDefault();
+            lastTouchX = e.touches[0].clientX - canvas.offsetLeft;
+            touchActive = true;
+        }
+        
+        function touchMoveHandler(e) {
+            e.preventDefault();
+            if (touchActive) {
+                const currentTouchX = e.touches[0].clientX - canvas.offsetLeft;
+                let targetX = paddle.x + (currentTouchX - lastTouchX);
+                targetX = Math.max(0, Math.min(CANVAS_WIDTH - paddle.width, targetX));
+                paddle.x = targetX;
+                lastTouchX = currentTouchX;
+            }
+        }
+
+        function touchEndHandler(e) {
+            touchActive = false;
+        }
+
+        function handleCanvasClick() {
+            if (!gameStarted) {
+                if (lives > 0) {
+                    startGame();
+                } else {
+                    restartGame();
+                }
+            }
+        }
+
+        function resetBall(isLaunching) {
+            balls = [];
+            const newBall = {
+                x: paddle.x + paddle.width / 2,
+                y: paddle.y - BALL_RADIUS,
+                radius: BALL_RADIUS,
+                vx: 0,
+                vy: 0,
+                hitsOnPaddle: 0
+            };
+            if (isLaunching) {
+                const angle = Math.PI / 2 + (Math.random() * 0.5 - 0.25);
+                newBall.vx = BALL_SPEED_INITIAL * Math.cos(angle);
+                newBall.vy = -BALL_SPEED_INITIAL * Math.sin(angle);
+            }
+            balls.push(newBall);
+        }
+
+        function startGame() {
+            gameStarted = true;
+            resetBall(true);
+        }
+        
+        async function initBlocks() {
+            blocks = [];
+            const stageIndex = currentStageNumber - 1;
+            const filename = `stage_${stageIndex.toString().padStart(2, '0')}.json`;
+            
+            try {
+                const response = await fetch(filename);
+                if (!response.ok) {
+                    const errorMessage = `ステージファイル「${filename}」が見つかりません。ランダムステージを生成します。
+開発環境でローカルファイルとして開いている場合、ブラウザのセキュリティ制限によりfetch()が機能しない場合があります。
+Visual Studio CodeのLive Server拡張機能などを使い、ローカルサーバー経由でアクセスしてください。`;
+                    throw new Error(errorMessage);
+                }
+                const stageData = await response.json();
+                
+                if (stageData.length !== BLOCK_COLUMN_COUNT * BLOCK_ROW_COUNT) {
+                    throw new Error('無効なステージファイル形式です。');
+                }
+
+                stageData.forEach((savedBlock, index) => {
+                    const c = Math.floor(index / BLOCK_ROW_COUNT);
+                    const r = index % BLOCK_ROW_COUNT;
+                    const blockX = c * BLOCK_WIDTH + BLOCK_OFFSET_LEFT;
+                    const blockY = r * BLOCK_HEIGHT + BLOCK_OFFSET_TOP;
+                    
+                    blocks.push({
+                        x: blockX,
+                        y: blockY,
+                        width: BLOCK_WIDTH,
+                        height: BLOCK_HEIGHT,
+                        status: savedBlock.status,
+                        hits: savedBlock.hits,
+                        isIndestructible: savedBlock.isIndestructible,
+                        isMagnetic: savedBlock.isMagnetic || false,
+                        colorIndex: savedBlock.colorIndex,
+                        color: savedBlock.isIndestructible ? '#A9A9A9' : COLOR_PALETTE[savedBlock.colorIndex][savedBlock.hits - 1]
+                    });
+                });
+                console.log(`${filename} が正常に読み込まれました。`);
+
+            } catch (error) {
+                console.warn(error.message);
+                for (let c = 0; c < BLOCK_COLUMN_COUNT; c++) {
+                    for (let r = 0; r < BLOCK_ROW_COUNT; r++) {
+                        const blockX = c * BLOCK_WIDTH + BLOCK_OFFSET_LEFT;
+                        const blockY = r * BLOCK_HEIGHT + BLOCK_OFFSET_TOP;
+                        const isIndestructible = Math.random() < 0.1;
+                        const hits = isIndestructible ? 100 : Math.floor(Math.random() * 3) + 1;
+                        const colorIndex = Math.floor(Math.random() * BASE_COLORS.length);
+                        const color = isIndestructible ? '#A9A9A9' : COLOR_PALETTE[colorIndex][hits - 1];
+                        blocks.push({
+                            x: blockX,
+                            y: blockY,
+                            width: BLOCK_WIDTH,
+                            height: BLOCK_HEIGHT,
+                            status: 1,
+                            hits: hits,
+                            isIndestructible: isIndestructible,
+                            isMagnetic: false,
+                            colorIndex: colorIndex,
+                            color: color
+                        });
+                    }
+                }
+                console.log(`ステージ${currentStageNumber}をランダム生成しました。`);
+            }
+        }
+        
+        function draw() {
+            ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+            
+            if (!editorMode) {
+                updatePaddle();
+                if (gameStarted) {
+                    updateBall();
+                    collisionDetection();
+                    updatePowerups();
+                }
+                drawGame();
+            } else {
+                drawEditor();
+            }
+            requestAnimationFrame(draw);
+        }
+
+        function drawGame() {
+            drawPaddle();
+            
+            if (!gameStarted && balls.length > 0) {
+                balls[0].x = paddle.x + paddle.width / 2;
+                balls[0].y = paddle.y - balls[0].radius;
+            }
+            
+            if (balls.length > 0) {
+                drawBall();
+            }
+            drawBlocks();
+            drawPowerups();
+            drawScore();
+            drawLives();
+            drawStageNumber();
+
+            if (!gameStarted) {
+                if (lives <= 0) {
+                    drawGameOver();
+                } else if (blocks.every(b => b.status === 0)) {
+                    drawWinScreen();
+                } else {
+                    drawStartScreen();
+                }
+            }
+        }
+        
+        function drawEditor() {
+            drawBlocks();
+        }
+
+        function drawPaddle() {
+            ctx.beginPath();
+            ctx.roundRect(paddle.x, paddle.y, paddle.width, paddle.height, 8);
+            ctx.fillStyle = '#a0aec0';
+            ctx.fill();
+            ctx.closePath();
+        }
+
+        function drawBall() {
+            balls.forEach(b => {
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+                ctx.fillStyle = '#f6e05e';
+                ctx.fill();
+                ctx.closePath();
+            });
+        }
+
+        function drawBlocks() {
+            const cornerRadius = 5;
+            for (let c = 0; c < BLOCK_COLUMN_COUNT; c++) {
+                for (let r = 0; r < BLOCK_ROW_COUNT; r++) {
+                    const block = blocks[c * BLOCK_ROW_COUNT + r];
+                    if (block.status === 1) {
+                        if (block.isIndestructible) {
+                            if (unbreakableBlockImage.complete && unbreakableBlockImage.naturalWidth > 0) {
+                                ctx.drawImage(unbreakableBlockImage, block.x, block.y, block.width, block.height);
+                            } else {
+                                ctx.fillStyle = "#A9A9A9";
+                                ctx.fillRect(block.x, block.y, block.width, block.height);
+                            }
+                        } else {
+                            ctx.fillStyle = block.color;
+                            ctx.beginPath();
+                            ctx.roundRect(block.x, block.y, block.width, block.height, cornerRadius);
+                            ctx.fill();
+                            ctx.strokeStyle = '#1a202c';
+                            ctx.lineWidth = 1;
+                            ctx.stroke();
+                            ctx.closePath();
+                        }
+                    }
+                }
+            }
+        }
+
+        function drawPowerups() {
+            powerups.forEach(p => {
+                ctx.beginPath();
+                ctx.roundRect(p.x, p.y, p.size, p.size, 5);
+                ctx.fillStyle = p.color;
+                ctx.fill();
+                ctx.closePath();
+            });
+        }
+
+        function drawScore() {
+            ctx.font = '16px "Inter"';
+            ctx.fillStyle = '#e2e8f0';
+            ctx.fillText('Score: ' + score, 8, 20);
+        }
+
+        function drawLives() {
+            ctx.font = '16px "Inter"';
+            ctx.fillStyle = '#e2e8f0';
+            ctx.fillText('Lives: ' + lives, CANVAS_WIDTH - 80, 20);
+        }
+
+        function drawStageNumber() {
+            ctx.font = '16px "Inter"';
+            ctx.fillStyle = '#e2e8f0';
+            ctx.textAlign = 'center';
+            ctx.fillText(`Stage: ${currentStageNumber}`, CANVAS_WIDTH / 2, 20);
+            ctx.textAlign = 'left';
+        }
+
+        function drawStartScreen() {
+            ctx.font = '30px "Inter"';
+            ctx.fillStyle = '#63b3ed';
+            ctx.textAlign = 'center';
+            ctx.fillText('クリック・タップ・スペースでスタート', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 20);
+            ctx.font = '20px "Inter"';
+            ctx.fillStyle = '#e2e8f0';
+            ctx.fillText('矢印キー・マウス・スワイプでパドル操作', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 20);
+            ctx.textAlign = 'left';
+        }
+
+        function drawGameOver() {
+            ctx.font = '40px "Inter"';
+            ctx.fillStyle = '#e53e3e';
+            ctx.textAlign = 'center';
+            ctx.fillText('ゲームオーバー', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 20);
+            ctx.font = '20px "Inter"';
+            ctx.fillStyle = '#e2e8f0';
+            ctx.fillText('スコア: ' + score, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 20);
+            ctx.fillText('クリック・タップ・スペースでリスタート', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 60);
+            ctx.textAlign = 'left';
+        }
+
+        function drawWinScreen() {
+            ctx.font = '40px "Inter"';
+            ctx.fillStyle = '#48bb78';
+            ctx.textAlign = 'center';
+            if (currentStageNumber < TOTAL_STAGES) {
+                ctx.fillText(`ステージ${currentStageNumber}クリア！`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 20);
+                ctx.font = '20px "Inter"';
+                ctx.fillStyle = '#e2e8f0';
+                ctx.fillText('次のステージへ', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 20);
+            } else {
+                ctx.fillText('Congratulations!!', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 20);
+                ctx.font = '20px "Inter"';
+                ctx.fillStyle = '#e2e8f0';
+                ctx.fillText('ステージ1に戻ります', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 20);
+            }
+            ctx.textAlign = 'left';
+        }
+
+        async function restartGame() {
+            balls = [];
+            powerups = [];
+            score = 0;
+            lives = 3;
+            currentStageNumber = 1;
+            paddle.width = PADDLE_WIDTH_INITIAL;
+            paddle.speed = PADDLE_SPEED_INITIAL;
+            paddle.dx = 0;
+            await initBlocks();
+            gameStarted = false;
+            resetBall(false);
+        }
+
+        function updatePaddle() {
+            const prevPaddleX = paddle.x;
+            
+            if (mouseTargetX !== null) {
+                const diff = mouseTargetX - paddle.x;
+                const moveAmount = Math.sign(diff) * Math.min(Math.abs(diff), paddle.speed);
+                paddle.x += moveAmount;
+            } else if (rightPressed && paddle.x < CANVAS_WIDTH - paddle.width) {
+                paddle.x += paddle.speed;
+            } else if (leftPressed && paddle.x > 0) {
+                paddle.x -= paddle.speed;
+            }
+            
+            if (paddle.x < 0) paddle.x = 0;
+            if (paddle.x + paddle.width > CANVAS_WIDTH) paddle.x = CANVAS_WIDTH - paddle.width;
+            
+            paddle.dx = paddle.x - prevPaddleX;
+        }
+
+        function updateBall() {
+            const nextBalls = [];
+            for (let i = 0; i < balls.length; i++) {
+                const b = balls[i];
+                blocks.forEach(block => {
+                    if (block.status === 1 && block.isMagnetic) {
+                        const blockCenterX = block.x + block.width / 2;
+                        const blockCenterY = block.y + block.height / 2;
+                        const dx = blockCenterX - b.x;
+                        const dy = blockCenterY - b.y;
+                        const distanceSq = dx * dx + dy * dy;
+                        const minDistanceSq = (block.width / 2 + b.radius) * (block.width / 2 + b.radius);
+                        const effectiveDistanceSq = Math.max(distanceSq, minDistanceSq);
+                        const forceMagnitude = ELECTROMAGNETIC_FORCE_CONSTANT / effectiveDistanceSq;
+                        b.vx += dx * forceMagnitude;
+                        b.vy += dy * forceMagnitude;
+                    }
+                });
+                b.vy += GRAVITY;
+                b.x += b.vx;
+                b.y += b.vy;
+
+                if (b.x + b.radius > CANVAS_WIDTH) {
+                    b.x = CANVAS_WIDTH - b.radius;
+                    b.vx *= -1 * DAMPING_FACTOR;
+                }
+                if (b.x - b.radius < 0) {
+                    b.x = b.radius;
+                    b.vx *= -1 * DAMPING_FACTOR;
+                }
+                if (b.y - b.radius < 0) {
+                    b.y = b.radius;
+                    b.vy *= -1 * DampingFactor;
+                }
+
+                if (
+                    b.y + b.radius > paddle.y &&
+                    b.y - b.radius < paddle.y + paddle.height &&
+                    b.x + b.radius > paddle.x &&
+                    b.x - b.radius < paddle.x + paddle.width
+                ) {
+                    if (b.vy > 0 && b.y < paddle.y + b.radius) {
+                        b.y = paddle.y - b.radius;
+                        b.hitsOnPaddle++;
+                        const speedIncrement = (MAX_BALL_SPEED - BALL_SPEED_INITIAL) / 10;
+                        let newTargetSpeed;
+                        if (b.hitsOnPaddle <= 10) {
+                             newTargetSpeed = BALL_SPEED_INITIAL + b.hitsOnPaddle * speedIncrement;
+                        } else {
+                             newTargetSpeed = MAX_BALL_SPEED;
+                        }
+
+                        const hitPoint = (b.x - (paddle.x + paddle.width / 2)) / (paddle.width / 2);
+                        const clampedHitPoint = Math.max(-1, Math.min(1, hitPoint));
+                        const baseVx = clampedHitPoint * newTargetSpeed * 0.8;
+                        const paddleInfluence = 0.5;
+                        let newVx = baseVx + paddle.dx * paddleInfluence;
+                        newVx = Math.max(-newTargetSpeed, Math.min(newTargetSpeed, newVx));
+                        let newVy = -Math.sqrt(newTargetSpeed * newTargetSpeed - newVx * newVx);
+                        const minVyComponent = newTargetSpeed * 0.2;
+                        if (isNaN(newVy) || Math.abs(newVy) < minVyComponent) {
+                            newVy = -minVyComponent;
+                            newVx = Math.sqrt(newTargetSpeed * newTargetSpeed - newVy * newVy) * (newVx < 0 ? -1 : 1);
+                        }
+                        b.vx = newVx;
+                        b.vy = newVy;
+                    }
+                }
+
+                if (b.y + b.radius > CANVAS_HEIGHT) {
+                } else {
+                    nextBalls.push(b);
+                }
+
+                const currentSpeed = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+                if (currentSpeed > MAX_BALL_SPEED) {
+                    b.vx = (b.vx / currentSpeed) * MAX_BALL_SPEED;
+                    b.vy = (b.vy / currentSpeed) * MAX_BALL_SPEED;
+                }
+            }
+            balls = nextBalls;
+            if (balls.length === 0 && gameStarted) {
+                lives--;
+                if (lives > 0) {
+                    gameStarted = false;
+                    resetBall(false);
+                } else {
+                    gameStarted = false;
+                }
+            }
+        }
+
+        function collisionDetection() {
+            let allBlocksDestroyed = true;
+            for (let i = 0; i < balls.length; i++) {
+                const ball = balls[i];
+                let hitThisFrame = false;
+
+                const prevBallX = ball.x - ball.vx;
+                const prevBallY = ball.y - ball.vy;
+
+                for (let c = 0; c < BLOCK_COLUMN_COUNT; c++) {
+                    for (let r = 0; r < BLOCK_ROW_COUNT; r++) {
+                        const block = blocks[c * BLOCK_ROW_COUNT + r];
+                        if (block.status === 1) {
+                             if (!block.isIndestructible) {
+                                allBlocksDestroyed = false;
+                             }
+                            const testX = Math.max(block.x, Math.min(ball.x, block.x + block.width));
+                            const testY = Math.max(block.y, Math.min(ball.y, block.y + block.height));
+                            const distX = ball.x - testX;
+                            const distY = ball.y - testY;
+                            const distance = Math.sqrt((distX * distX) + (distY * distY));
+                            if (distance <= ball.radius) {
+                                if (!block.isIndestructible) {
+                                    block.hits--;
+                                    if (block.hits <= 0) {
+                                        block.status = 0;
+                                        score += 10;
+                                    } else {
+                                        block.color = COLOR_PALETTE[block.colorIndex][block.hits - 1];
+                                    }
+                                }
+                                
+                                if (Math.random() < 0.3 && block.status === 0) {
+                                    const powerupTypes = ['paddle_enlarge', 'split_ball', 'paddle_speedup'];
+                                    const randomType = powerupTypes[Math.floor(Math.random() * powerupTypes.length)];
+                                    powerups.push({
+                                        x: block.x + block.width / 2 - POWERUP_SIZE / 2,
+                                        y: block.y + block.height / 2 - POWERUP_SIZE / 2,
+                                        size: POWERUP_SIZE,
+                                        color: (randomType === 'split_ball' ? '#ff00ff' : randomType === 'paddle_speedup' ? '#38a169' : '#ecc94b'),
+                                        type: randomType
+                                    });
+                                }
+
+                                const prevTestX = Math.max(block.x, Math.min(prevBallX, block.x + block.width));
+                                const prevTestY = Math.max(block.y, Math.min(prevBallY, block.y + block.height));
+                                const prevDistX = prevBallX - prevTestX;
+                                const prevDistY = prevBallY - prevTestY;
+
+                                if (Math.abs(prevDistX) > Math.abs(prevDistY)) {
+                                    ball.vx *= -1;
+                                } else {
+                                    ball.vy *= -1;
+                                }
+
+                                const overlapX = ball.radius - Math.abs(distX);
+                                const overlapY = ball.radius - Math.abs(distY);
+
+                                if (overlapX > overlapY) {
+                                    ball.y += ball.vy > 0 ? overlapY : -overlapY;
+                                } else {
+                                    ball.x += ball.vx > 0 ? overlapX : -overlapX;
+                                }
+                                hitThisFrame = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (hitThisFrame) break;
+                }
+            }
+            if (gameStarted && allBlocksDestroyed) {
+                gameStarted = false;
+                drawWinScreen();
+                lives += 3;
+                setTimeout(async () => {
+                    if (currentStageNumber < TOTAL_STAGES) {
+                        currentStageNumber++;
+                    } else {
+                        currentStageNumber = 1;
+                    }
+                    await initBlocks();
+                    resetBall(false);
+                    gameStarted = false;
+                }, 3000);
+            }
+        }
+
+        function updatePowerups() {
+            for (let i = powerups.length - 1; i >= 0; i--) {
+                const p = powerups[i];
+                p.y += POWERUP_SPEED;
+                if (
+                    p.y + p.size > paddle.y &&
+                    p.y < paddle.y + paddle.height &&
+                    p.x + p.size > paddle.x &&
+                    p.x < paddle.x + paddle.width
+                ) {
+                    if (p.type === 'paddle_enlarge') {
+                        paddle.width = Math.min(paddle.width + 30, CANVAS_WIDTH * 0.8);
+                    } else if (p.type === 'split_ball') {
+                        const ballsToAdd = [];
+                        const currentBallsCount = balls.length;
+                        for (let j = 0; j < currentBallsCount; j++) {
+                            const originalBall = balls[j];
+                            const angleOffset = Math.PI / 10;
+                            ballsToAdd.push({
+                                x: originalBall.x,
+                                y: originalBall.y,
+                                radius: BALL_RADIUS,
+                                vx: BALL_SPEED_INITIAL * Math.cos(Math.atan2(originalBall.vy, originalBall.vx) + angleOffset),
+                                vy: BALL_SPEED_INITIAL * Math.sin(Math.atan2(originalBall.vy, originalBall.vx) + angleOffset),
+                                hitsOnPaddle: 0
+                            });
+                            ballsToAdd.push({
+                                x: originalBall.x,
+                                y: originalBall.y,
+                                radius: BALL_RADIUS,
+                                vx: BALL_SPEED_INITIAL * Math.cos(Math.atan2(originalBall.vy, originalBall.vx) - angleOffset),
+                                vy: BALL_SPEED_INITIAL * Math.sin(Math.atan2(originalBall.vy, originalBall.vx) - angleOffset),
+                                hitsOnPaddle: 0
+                            });
+                        }
+                        balls.push(...ballsToAdd);
+                    } else if (p.type === 'paddle_speedup') {
+                        paddle.speed = Math.min(paddle.speed + 2, PADDLE_SPEED_MAX);
+                    }
+                    powerups.splice(i, 1);
+                }
+                if (p.y > CANVAS_HEIGHT) {
+                    powerups.splice(i, 1);
+                }
+            }
+        }
+
+        async function setupGame() {
+            await initBlocks();
+            resetBall(false);
+            activateGameEventListeners();
+            requestAnimationFrame(draw);
+        }
+
+        setupGame();
+    </script>
+</body>
+</html>
