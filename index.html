@@ -65,7 +65,7 @@
         document.addEventListener('click', () => {
             canvas.focus();
         });
-        
+
         // キーボードのデフォルト動作（スクロールなど）を無効化
         document.addEventListener('keydown', (e) => {
             if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
@@ -122,6 +122,9 @@
 
         let rightPressed = false;
         let leftPressed = false;
+        // マウスとタッチ操作用の状態変数
+        let mouseRightPressed = false;
+        let mouseLeftPressed = false;
 
         // キーイベントリスナーをcanvas自体に設定
         canvas.addEventListener('keydown', keyDownHandler, false);
@@ -166,20 +169,32 @@
         // マウス移動でパドルを一定速度で動かす
         function mouseMoveHandler(e) {
             const relativeX = e.clientX - canvas.offsetLeft;
-            if (relativeX > 0 && relativeX < CANVAS_WIDTH) {
-                let targetX = relativeX - paddle.width / 2;
-                targetX = Math.max(0, Math.min(CANVAS_WIDTH - paddle.width, targetX));
-                if (Math.abs(targetX - paddle.x) > paddle.speed) {
-                    paddle.x += paddle.speed * Math.sign(targetX - paddle.x);
-                } else {
-                    paddle.x = targetX;
-                }
+            // マウスカーソルのX座標がパドルの範囲内にあるかをチェック
+            if (relativeX > paddle.x + paddle.width) {
+                mouseRightPressed = true;
+                mouseLeftPressed = false;
+            } else if (relativeX < paddle.x) {
+                mouseRightPressed = false;
+                mouseLeftPressed = true;
+            } else {
+                // マウスカーソルがパドルの範囲内にある場合は停止
+                mouseRightPressed = false;
+                mouseLeftPressed = false;
             }
         }
 
         function touchStartHandler(e) {
             e.preventDefault();
-            lastTouchX = e.touches[0].clientX - canvas.offsetLeft;
+            // タッチ開始時にパドルの中心とタッチ位置を比較して方向を決定
+            const touchX = e.touches[0].clientX - canvas.offsetLeft;
+            const paddleCenter = paddle.x + paddle.width / 2;
+            if (touchX > paddleCenter) {
+                mouseRightPressed = true;
+                mouseLeftPressed = false;
+            } else {
+                mouseRightPressed = false;
+                mouseLeftPressed = true;
+            }
             touchActive = true;
         }
 
@@ -187,20 +202,22 @@
         function touchMoveHandler(e) {
             e.preventDefault();
             if (touchActive) {
-                const currentTouchX = e.touches[0].clientX - canvas.offsetLeft;
-                let targetX = paddle.x + (currentTouchX - lastTouchX);
-                targetX = Math.max(0, Math.min(CANVAS_WIDTH - paddle.width, targetX));
-                if (Math.abs(targetX - paddle.x) > paddle.speed) {
-                    paddle.x += paddle.speed * Math.sign(targetX - paddle.x);
+                const touchX = e.touches[0].clientX - canvas.offsetLeft;
+                const paddleCenter = paddle.x + paddle.width / 2;
+                if (touchX > paddleCenter) {
+                    mouseRightPressed = true;
+                    mouseLeftPressed = false;
                 } else {
-                    paddle.x = targetX;
+                    mouseRightPressed = false;
+                    mouseLeftPressed = true;
                 }
-                lastTouchX = currentTouchX;
             }
         }
 
         function touchEndHandler(e) {
             touchActive = false;
+            mouseRightPressed = false;
+            mouseLeftPressed = false;
         }
 
         function handleCanvasClick() {
@@ -266,13 +283,13 @@
 
         function draw() {
             ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-            
+
             // updatePaddle() を drawPaddle() の前に呼び出すことで、
             // パドルの位置を更新してから描画する
             updatePaddle();
 
             drawPaddle();
-            
+
             if (!gameStarted && balls.length > 0) {
                 // パドルの位置が更新された後にボールの位置を同期させる
                 balls[0].x = paddle.x + paddle.width / 2;
@@ -412,9 +429,9 @@
         // パドルの位置を更新（矢印キーでスタート前も動かせる）
         function updatePaddle() {
             const prevPaddleX = paddle.x;
-            if (rightPressed && paddle.x < CANVAS_WIDTH - paddle.width) {
+            if ((rightPressed || mouseRightPressed) && paddle.x < CANVAS_WIDTH - paddle.width) {
                 paddle.x += paddle.speed;
-            } else if (leftPressed && paddle.x > 0) {
+            } else if ((leftPressed || mouseLeftPressed) && paddle.x > 0) {
                 paddle.x -= paddle.speed;
             }
             if (paddle.x < 0) paddle.x = 0;
