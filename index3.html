@@ -186,13 +186,17 @@
         const GRAVITY = 0.04;
         const DAMPING_FACTOR = 0.99;
         const BALL_MAX_COUNT = 40;
-
+        
         const BLOCK_ROW_COUNT = 16;
         const BLOCK_COLUMN_COUNT = 10;
         const BLOCK_WIDTH = CANVAS_WIDTH / BLOCK_COLUMN_COUNT;
         const BLOCK_HEIGHT = 20;
         const BLOCK_OFFSET_TOP = 50;
         const BLOCK_OFFSET_LEFT = 0;
+        
+        const POSITIVE_BLOCK_FORCE = 0.5;
+        const POSITIVE_BLOCK_RANGE_SQ = (BLOCK_WIDTH * 6) * (BLOCK_WIDTH * 6);
+        const BALL_COLORS = ['#3182ce', '#63b3ed', '#a0aec0', '#e2e8f0', '#fbd38d', '#fc8181', '#e53e3e'];
 
         const POWERUP_SIZE = 20;
         const POWERUP_SPEED = 2;
@@ -244,11 +248,17 @@
         let gameStarted = false;
         let editorMode = false;
         let isDragging = false;
+        let hasDragged = false;
         let startDragPos = { x: 0, y: 0 };
+        let endDragPos = { x: 0, y: 0 };
         let selectedBlock = {
             status: 1,
             hits: 1,
             isIndestructible: false,
+            isChargeBlock: false,
+            chargeChange: 0,
+            isElectricForceBlock: false,
+            electricCharge: 0,
             colorIndex: 0
         };
         let isTransitioningToNextStage = false;
@@ -261,6 +271,15 @@
         
         let unbreakableBlockImage = new Image();
         unbreakableBlockImage.src = 'unbreakable_block.png';
+        let posChargeAddBlockImage = new Image();
+        posChargeAddBlockImage.src = 'pos_charge_add_block.png';
+        let negChargeAddBlockImage = new Image();
+        negChargeAddBlockImage.src = 'neg_charge_add_block.png';
+        let positiveBlockImage = new Image();
+        positiveBlockImage.src = 'positive_block.png';
+        let negativeBlockImage = new Image();
+        negativeBlockImage.src = 'negative_block.png';
+
 
         function activateGameEventListeners() {
             canvas.addEventListener('keydown', keyDownHandler, false);
@@ -275,6 +294,7 @@
         function activateEditorEventListeners() {
             canvas.addEventListener('mousedown', editorMouseDownHandler);
             canvas.addEventListener('mouseup', editorMouseUpHandler);
+            canvas.addEventListener('mousemove', editorMouseMoveHandler);
         }
 
         function removeAllEventListeners() {
@@ -287,6 +307,7 @@
             canvas.removeEventListener('touchend', touchEndHandler);
             canvas.removeEventListener('mousedown', editorMouseDownHandler);
             canvas.removeEventListener('mouseup', editorMouseUpHandler);
+            canvas.removeEventListener('mousemove', editorMouseMoveHandler);
         }
 
         function setupEditorBlockPicker() {
@@ -305,8 +326,32 @@
             unbreakableTile.setAttribute('data-hits', '100');
             unbreakableTile.setAttribute('data-color-index', '-1');
             unbreakableTile.setAttribute('data-status', '1');
-            unbreakableTile.addEventListener('click', () => selectEditorBlock({ status: 1, hits: 100, isIndestructible: true, colorIndex: -1 }, unbreakableTile));
+            unbreakableTile.addEventListener('click', () => selectEditorBlock({ status: 1, hits: 100, isIndestructible: true, isChargeBlock: false, chargeChange: 0, isElectricForceBlock: false, electricCharge: 0, colorIndex: -1 }, unbreakableTile));
             editorBlockPicker.appendChild(unbreakableTile);
+
+            let posChargeTile = document.createElement('div');
+            posChargeTile.className = 'block-tile';
+            posChargeTile.style.backgroundColor = 'rgba(255, 0, 0, 0.5)';
+            posChargeTile.addEventListener('click', () => selectEditorBlock({ status: 1, hits: 1, isIndestructible: true, isChargeBlock: true, chargeChange: 1, isElectricForceBlock: false, electricCharge: 0 }, posChargeTile));
+            editorBlockPicker.appendChild(posChargeTile);
+
+            let negChargeTile = document.createElement('div');
+            negChargeTile.className = 'block-tile';
+            negChargeTile.style.backgroundColor = 'rgba(0, 0, 255, 0.5)';
+            negChargeTile.addEventListener('click', () => selectEditorBlock({ status: 1, hits: 1, isIndestructible: true, isChargeBlock: true, chargeChange: -1, isElectricForceBlock: false, electricCharge: 0 }, negChargeTile));
+            editorBlockPicker.appendChild(negChargeTile);
+
+            let positiveElectricTile = document.createElement('div');
+            positiveElectricTile.className = 'block-tile';
+            positiveElectricTile.style.backgroundColor = 'red';
+            positiveElectricTile.addEventListener('click', () => selectEditorBlock({ status: 1, hits: 1, isIndestructible: false, isChargeBlock: false, chargeChange: 0, isElectricForceBlock: true, electricCharge: 1, colorIndex: -1 }, positiveElectricTile));
+            editorBlockPicker.appendChild(positiveElectricTile);
+            
+            let negativeElectricTile = document.createElement('div');
+            negativeElectricTile.className = 'block-tile';
+            negativeElectricTile.style.backgroundColor = 'blue';
+            negativeElectricTile.addEventListener('click', () => selectEditorBlock({ status: 1, hits: 1, isIndestructible: false, isChargeBlock: false, chargeChange: 0, isElectricForceBlock: true, electricCharge: -1, colorIndex: -1 }, negativeElectricTile));
+            editorBlockPicker.appendChild(negativeElectricTile);
             
             for (let r = 0; r < BASE_COLORS.length; r++) {
                 for (let h = 1; h <= 3; h++) {
@@ -316,13 +361,13 @@
                     tile.setAttribute('data-hits', h);
                     tile.setAttribute('data-color-index', r);
                     tile.setAttribute('data-status', '1');
-                    tile.addEventListener('click', () => selectEditorBlock({ status: 1, hits: h, isIndestructible: false, colorIndex: r }, tile));
+                    tile.addEventListener('click', () => selectEditorBlock({ status: 1, hits: h, isIndestructible: false, isChargeBlock: false, chargeChange: 0, isElectricForceBlock: false, electricCharge: 0, colorIndex: r }, tile));
                     editorBlockPicker.appendChild(tile);
                 }
             }
             const firstTile = editorBlockPicker.querySelector('.block-tile[data-hits="1"][data-color-index="0"]');
             if (firstTile) {
-                selectEditorBlock({ status: 1, hits: 1, isIndestructible: false, colorIndex: 0 }, firstTile);
+                selectEditorBlock({ status: 1, hits: 1, isIndestructible: false, isChargeBlock: false, chargeChange: 0, isElectricForceBlock: false, electricCharge: 0, colorIndex: 0 }, firstTile);
             }
         }
 
@@ -331,7 +376,16 @@
             if (element) {
                 element.classList.add('selected');
             }
-            selectedBlock = block;
+            selectedBlock = {
+                status: block.status,
+                hits: block.hits || 0,
+                isIndestructible: block.isIndestructible || false,
+                isChargeBlock: block.isChargeBlock || false,
+                chargeChange: block.chargeChange || 0,
+                isElectricForceBlock: block.isElectricForceBlock || false,
+                electricCharge: block.electricCharge || 0,
+                colorIndex: block.colorIndex || 0
+            };
         }
 
         async function toggleEditorMode() {
@@ -358,47 +412,99 @@
             startDragPos.x = e.clientX - rect.left;
             startDragPos.y = e.clientY - rect.top;
             isDragging = true;
+            hasDragged = false;
+        }
+
+        function editorMouseMoveHandler(e) {
+            if (!isDragging) return;
+            hasDragged = true;
+            const rect = canvas.getBoundingClientRect();
+            endDragPos.x = e.clientX - rect.left;
+            endDragPos.y = e.clientY - rect.top;
         }
 
         function editorMouseUpHandler(e) {
             if (!isDragging) return;
             e.preventDefault();
-            isDragging = false;
-
+            
             const rect = canvas.getBoundingClientRect();
             const endDragX = e.clientX - rect.left;
             const endDragY = e.clientY - rect.top;
+            endDragPos.x = endDragX;
+            endDragPos.y = endDragY;
 
-            let startC = Math.floor(Math.min(startDragPos.x, endDragX) / BLOCK_WIDTH);
-            let endC = Math.floor(Math.max(startDragPos.x, endDragX) / BLOCK_WIDTH);
-            let startR = Math.floor((Math.min(startDragPos.y, endDragY) - BLOCK_OFFSET_TOP) / BLOCK_HEIGHT);
-            let endR = Math.floor((Math.max(startDragPos.y, endDragY) - BLOCK_OFFSET_TOP) / BLOCK_HEIGHT);
-            
-            startC = Math.max(0, startC);
-            endC = Math.min(BLOCK_COLUMN_COUNT - 1, endC);
-            startR = Math.max(0, startR);
-            endR = Math.min(BLOCK_ROW_COUNT - 1, endR);
+            let startC, endC, startR, endR;
 
-            for (let c = startC; c <= endC; c++) {
-                for (let r = startR; r <= endR; r++) {
+            if (!hasDragged) {
+                // Single click logic
+                const mouseX = startDragPos.x;
+                const mouseY = startDragPos.y;
+                const c = Math.floor(mouseX / BLOCK_WIDTH);
+                const r = Math.floor((mouseY - BLOCK_OFFSET_TOP) / BLOCK_HEIGHT);
+                
+                if (c >= 0 && c < BLOCK_COLUMN_COUNT && r >= 0 && r < BLOCK_ROW_COUNT) {
                     const blockIndex = c * BLOCK_ROW_COUNT + r;
-                    if (blockIndex >= 0 && blockIndex < blocks.length) {
-                        const block = blocks[blockIndex];
+                    const block = blocks[blockIndex];
+                    if (block.status === 1) {
+                        block.status = 0;
+                    } else {
+                        applyBlockProperties(block, selectedBlock);
+                    }
+                }
+            } else {
+                // Drag and drop logic
+                startC = Math.floor(Math.min(startDragPos.x, endDragPos.x) / BLOCK_WIDTH);
+                endC = Math.floor(Math.max(startDragPos.x, endDragPos.x) / BLOCK_WIDTH);
+                startR = Math.floor((Math.min(startDragPos.y, endDragPos.y) - BLOCK_OFFSET_TOP) / BLOCK_HEIGHT);
+                endR = Math.floor((Math.max(startDragPos.y, endDragPos.y) - BLOCK_OFFSET_TOP) / BLOCK_HEIGHT);
+                
+                startC = Math.max(0, startC);
+                endC = Math.min(BLOCK_COLUMN_COUNT - 1, endC);
+                startR = Math.max(0, startR);
+                endR = Math.min(BLOCK_ROW_COUNT - 1, endR);
 
-                        block.status = selectedBlock.status; 
-                        
-                        if (block.status === 1) {
-                            block.isIndestructible = selectedBlock.isIndestructible;
-                            block.isMagnetic = false;
-                            block.hits = selectedBlock.hits;
-                            block.colorIndex = selectedBlock.colorIndex;
-                            if (!block.isIndestructible) {
-                                block.color = COLOR_PALETTE[block.colorIndex][block.hits - 1];
-                            } else {
-                                block.color = '#A9A9A9';
-                            }
+                for (let c = startC; c <= endC; c++) {
+                    for (let r = startR; r <= endR; r++) {
+                        const blockIndex = c * BLOCK_ROW_COUNT + r;
+                        if (blockIndex >= 0 && blockIndex < blocks.length) {
+                           applyBlockProperties(blocks[blockIndex], selectedBlock);
                         }
                     }
+                }
+            }
+
+            isDragging = false;
+            hasDragged = false;
+            startDragPos = { x: 0, y: 0 };
+            endDragPos = { x: 0, y: 0 };
+        }
+        
+        function applyBlockProperties(block, properties) {
+            block.status = properties.status; 
+            
+            if (block.status === 1) {
+                block.isIndestructible = properties.isIndestructible;
+                block.isChargeBlock = properties.isChargeBlock;
+                block.chargeChange = properties.chargeChange;
+                block.isElectricForceBlock = properties.isElectricForceBlock;
+                block.electricCharge = properties.electricCharge;
+
+                if (!block.isIndestructible && !block.isChargeBlock && !block.isElectricForceBlock) {
+                    block.hits = properties.hits;
+                    block.colorIndex = properties.colorIndex;
+                    block.color = COLOR_PALETTE[block.colorIndex][block.hits - 1];
+                } else if (block.isChargeBlock) {
+                    block.hits = 100;
+                    block.colorIndex = -1;
+                    block.color = block.chargeChange > 0 ? 'rgba(255, 0, 0, 0.5)' : 'rgba(0, 0, 255, 0.5)';
+                } else if (block.isElectricForceBlock) {
+                    block.hits = 1;
+                    block.colorIndex = -1;
+                    block.color = block.electricCharge > 0 ? 'red' : 'blue';
+                } else if (block.isIndestructible) {
+                    block.hits = 100;
+                    block.colorIndex = -1;
+                    block.color = '#A9A9A9';
                 }
             }
         }
@@ -412,6 +518,10 @@
                     status: 1,
                     hits: block.hits,
                     isIndestructible: block.isIndestructible,
+                    isChargeBlock: block.isChargeBlock,
+                    chargeChange: block.chargeChange,
+                    isElectricForceBlock: block.isElectricForceBlock,
+                    electricCharge: block.electricCharge,
                     colorIndex: block.colorIndex
                 };
             });
@@ -441,13 +551,29 @@
                             
                             block.status = savedBlock.status;
                             if (block.status === 1) {
-                                block.hits = savedBlock.hits;
-                                block.isIndestructible = savedBlock.isIndestructible;
-                                block.colorIndex = savedBlock.colorIndex;
-                                block.color = block.isIndestructible ? '#A9A9A9' : COLOR_PALETTE[block.colorIndex][savedBlock.hits - 1];
+                                block.hits = savedBlock.hits || 0;
+                                block.isIndestructible = savedBlock.isIndestructible || false;
+                                block.isChargeBlock = savedBlock.isChargeBlock || false;
+                                block.chargeChange = savedBlock.chargeChange || 0;
+                                block.isElectricForceBlock = savedBlock.isElectricForceBlock || false;
+                                block.electricCharge = savedBlock.electricCharge || 0;
+                                block.colorIndex = savedBlock.colorIndex || 0;
+                                if (block.isChargeBlock) {
+                                   block.color = block.chargeChange > 0 ? 'rgba(255, 0, 0, 0.5)' : 'rgba(0, 0, 255, 0.5)';
+                                } else if (block.isElectricForceBlock) {
+                                    block.color = block.electricCharge > 0 ? 'red' : 'blue';
+                                } else if (block.isIndestructible) {
+                                    block.color = '#A9A9A9';
+                                } else {
+                                    block.color = COLOR_PALETTE[block.colorIndex][block.hits - 1];
+                                }
                             } else {
                                 block.hits = 0;
                                 block.isIndestructible = false;
+                                block.isChargeBlock = false;
+                                block.chargeChange = 0;
+                                block.isElectricForceBlock = false;
+                                block.electricCharge = 0;
                                 block.colorIndex = -1;
                                 block.color = '';
                             }
@@ -531,7 +657,8 @@
                 radius: BALL_RADIUS,
                 vx: 0,
                 vy: 0,
-                hitsOnPaddle: 0
+                hitsOnPaddle: 0,
+                charge: 0
             };
             if (isLaunching) {
                 const angle = Math.PI / 2 + (Math.random() * 0.5 - 0.25);
@@ -577,12 +704,24 @@
                         status: savedBlock.status || 0,
                         hits: savedBlock.hits || 0,
                         isIndestructible: savedBlock.isIndestructible || false,
-                        isMagnetic: savedBlock.isMagnetic || false,
-                        colorIndex: savedBlock.colorIndex || 0
+                        isChargeBlock: savedBlock.isChargeBlock || false,
+                        chargeChange: savedBlock.chargeChange || 0,
+                        isElectricForceBlock: savedBlock.isElectricForceBlock || false,
+                        electricCharge: savedBlock.electricCharge || 0,
+                        colorIndex: savedBlock.colorIndex || 0,
+                        color: ''
                     };
                     
                     if (block.status === 1) {
-                        block.color = block.isIndestructible ? '#A9A9A9' : COLOR_PALETTE[block.colorIndex][block.hits - 1];
+                        if (block.isChargeBlock) {
+                           block.color = block.chargeChange > 0 ? 'rgba(255, 0, 0, 0.5)' : 'rgba(0, 0, 255, 0.5)';
+                        } else if (block.isElectricForceBlock) {
+                            block.color = block.electricCharge > 0 ? 'red' : 'blue';
+                        } else if (block.isIndestructible) {
+                            block.color = '#A9A9A9';
+                        } else {
+                            block.color = COLOR_PALETTE[block.colorIndex][block.hits - 1];
+                        }
                     } else {
                         block.color = '';
                     }
@@ -600,6 +739,7 @@
                         const hits = isIndestructible ? 100 : Math.floor(Math.random() * 3) + 1;
                         const colorIndex = Math.floor(Math.random() * BASE_COLORS.length);
                         const color = isIndestructible ? '#A9A9A9' : COLOR_PALETTE[colorIndex][hits - 1];
+                        
                         blocks.push({
                             x: blockX,
                             y: blockY,
@@ -608,7 +748,10 @@
                             status: 1,
                             hits: hits,
                             isIndestructible: isIndestructible,
-                            isMagnetic: false,
+                            isChargeBlock: false,
+                            chargeChange: 0,
+                            isElectricForceBlock: false,
+                            electricCharge: 0,
                             colorIndex: colorIndex,
                             color: color
                         });
@@ -631,6 +774,9 @@
                 drawGame();
             } else {
                 drawEditor();
+                if (isDragging) {
+                    drawEditorPreview();
+                }
             }
             requestAnimationFrame(draw);
         }
@@ -669,6 +815,32 @@
             drawBlocks();
         }
 
+        function drawEditorPreview() {
+            const rect = canvas.getBoundingClientRect();
+            
+            let startC = Math.floor(Math.min(startDragPos.x, endDragPos.x) / BLOCK_WIDTH);
+            let endC = Math.floor(Math.max(startDragPos.x, endDragPos.x) / BLOCK_WIDTH);
+            let startR = Math.floor((Math.min(startDragPos.y, endDragPos.y) - BLOCK_OFFSET_TOP) / BLOCK_HEIGHT);
+            let endR = Math.floor((Math.max(startDragPos.y, endDragPos.y) - BLOCK_OFFSET_TOP) / BLOCK_HEIGHT);
+
+            startC = Math.max(0, startC);
+            endC = Math.min(BLOCK_COLUMN_COUNT - 1, endC);
+            startR = Math.max(0, startR);
+            endR = Math.min(BLOCK_ROW_COUNT - 1, endR);
+
+            const previewX = startC * BLOCK_WIDTH;
+            const previewY = startR * BLOCK_HEIGHT + BLOCK_OFFSET_TOP;
+            const previewWidth = (endC - startC + 1) * BLOCK_WIDTH;
+            const previewHeight = (endR - startR + 1) * BLOCK_HEIGHT;
+            
+            if (previewWidth > 0 && previewHeight > 0 && previewY + previewHeight > BLOCK_OFFSET_TOP) {
+                 ctx.globalAlpha = 0.5;
+                 ctx.fillStyle = '#63b3ed';
+                 ctx.fillRect(previewX, previewY, previewWidth, previewHeight);
+                 ctx.globalAlpha = 1.0;
+            }
+        }
+
         function drawPaddle() {
             ctx.beginPath();
             ctx.roundRect(paddle.x, paddle.y, paddle.width, paddle.height, 8);
@@ -681,7 +853,11 @@
             balls.forEach(b => {
                 ctx.beginPath();
                 ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
-                ctx.fillStyle = '#f6e05e';
+                
+                const chargeIndex = b.charge + 3;
+                const ballColor = BALL_COLORS[chargeIndex] || '#a0aec0';
+                ctx.fillStyle = ballColor;
+
                 ctx.fill();
                 ctx.closePath();
             });
@@ -693,13 +869,17 @@
                 for (let r = 0; r < BLOCK_ROW_COUNT; r++) {
                     const block = blocks[c * BLOCK_ROW_COUNT + r];
                     if (block.status === 1) {
-                        if (block.isIndestructible) {
-                            if (unbreakableBlockImage.complete && unbreakableBlockImage.naturalWidth > 0) {
-                                ctx.drawImage(unbreakableBlockImage, block.x, block.y, block.width, block.height);
-                            } else {
-                                ctx.fillStyle = "#A9A9A9";
-                                ctx.fillRect(block.x, block.y, block.width, block.height);
-                            }
+                        let imageToDraw = null;
+                        if (block.isIndestructible && !block.isChargeBlock) {
+                            imageToDraw = unbreakableBlockImage;
+                        } else if (block.isChargeBlock) {
+                            imageToDraw = block.chargeChange > 0 ? posChargeAddBlockImage : negChargeAddBlockImage;
+                        } else if (block.isElectricForceBlock) {
+                            imageToDraw = block.electricCharge > 0 ? positiveBlockImage : negativeBlockImage;
+                        }
+
+                        if (imageToDraw && imageToDraw.complete && imageToDraw.naturalWidth > 0) {
+                            ctx.drawImage(imageToDraw, block.x, block.y, block.width, block.height);
                         } else {
                             ctx.fillStyle = block.color;
                             ctx.beginPath();
@@ -823,20 +1003,33 @@
             const nextBalls = [];
             for (let i = 0; i < balls.length; i++) {
                 const b = balls[i];
-                blocks.forEach(block => {
-                    if (block.status === 1 && block.isMagnetic) {
-                        const blockCenterX = block.x + block.width / 2;
-                        const blockCenterY = block.y + block.height / 2;
-                        const dx = blockCenterX - b.x;
-                        const dy = blockCenterY - b.y;
-                        const distanceSq = dx * dx + dy * dy;
-                        const minDistanceSq = (block.width / 2 + b.radius) * (block.width / 2 + b.radius);
-                        const effectiveDistanceSq = Math.max(distanceSq, minDistanceSq);
-                        const forceMagnitude = ELECTROMAGNETIC_FORCE_CONSTANT / effectiveDistanceSq;
-                        b.vx += dx * forceMagnitude;
-                        b.vy += dy * forceMagnitude;
+                
+                const blockRadius = 6;
+                const minC = Math.max(0, Math.floor((b.x - blockRadius * BLOCK_WIDTH) / BLOCK_WIDTH));
+                const maxC = Math.min(BLOCK_COLUMN_COUNT - 1, Math.floor((b.x + blockRadius * BLOCK_WIDTH) / BLOCK_WIDTH));
+                const minR = Math.max(0, Math.floor((b.y - blockRadius * BLOCK_HEIGHT) / BLOCK_HEIGHT));
+                const maxR = Math.min(BLOCK_ROW_COUNT - 1, Math.floor((b.y + blockRadius * BLOCK_HEIGHT) / BLOCK_HEIGHT));
+
+                for (let c = minC; c <= maxC; c++) {
+                    for (let r = minR; r <= maxR; r++) {
+                        const block = blocks[c * BLOCK_ROW_COUNT + r];
+                        if (block.status === 1 && block.isElectricForceBlock) {
+                            const blockCenterX = block.x + block.width / 2;
+                            const blockCenterY = block.y + block.height / 2;
+                            const dx = b.x - blockCenterX;
+                            const dy = b.y - blockCenterY;
+                            const distanceSq = dx * dx + dy * dy;
+
+                            if (distanceSq < POSITIVE_BLOCK_RANGE_SQ && distanceSq > 0) {
+                                const forceDirection = b.charge * block.electricCharge;
+                                const forceMagnitude = POSITIVE_BLOCK_FORCE / distanceSq;
+                                b.vx -= dx * forceMagnitude * forceDirection;
+                                b.vy -= dy * forceMagnitude * forceDirection;
+                            }
+                        }
                     }
-                });
+                }
+
                 b.vy += GRAVITY;
                 b.x += b.vx;
                 b.y += b.vy;
@@ -920,7 +1113,7 @@
             for (let c = 0; c < BLOCK_COLUMN_COUNT; c++) {
                 for (let r = 0; r < BLOCK_ROW_COUNT; r++) {
                     const block = blocks[c * BLOCK_ROW_COUNT + r];
-                    if (block.status === 1 && !block.isIndestructible) {
+                    if (block.status === 1 && !block.isIndestructible && !block.isChargeBlock) {
                         allBlocksDestroyed = false;
                         break;
                     }
@@ -944,7 +1137,9 @@
                             const distY = ball.y - testY;
                             const distance = Math.sqrt((distX * distX) + (distY * distY));
                             if (distance <= ball.radius) {
-                                if (!block.isIndestructible) {
+                                if (block.isChargeBlock) {
+                                    ball.charge = Math.max(-3, Math.min(3, ball.charge + block.chargeChange));
+                                } else if (!block.isIndestructible) {
                                     block.hits--;
                                     if (block.hits <= 0) {
                                         block.status = 0;
@@ -953,7 +1148,7 @@
                                         block.color = COLOR_PALETTE[block.colorIndex][block.hits - 1];
                                     }
                                 }
-                                
+
                                 if (Math.random() < 0.3 && block.status === 0) {
                                     const powerupTypes = ['paddle_enlarge', 'paddle_speedup'];
                                     if (balls.length < BALL_MAX_COUNT) {
@@ -1042,7 +1237,8 @@
                                     radius: BALL_RADIUS,
                                     vx: BALL_SPEED_INITIAL * Math.cos(Math.atan2(originalBall.vy, originalBall.vx) + angleOffset),
                                     vy: BALL_SPEED_INITIAL * Math.sin(Math.atan2(originalBall.vy, originalBall.vx) + angleOffset),
-                                    hitsOnPaddle: 0
+                                    hitsOnPaddle: 0,
+                                    charge: originalBall.charge
                                 });
                                 maxNewBalls--;
                                 
@@ -1053,7 +1249,8 @@
                                         radius: BALL_RADIUS,
                                         vx: BALL_SPEED_INITIAL * Math.cos(Math.atan2(originalBall.vy, originalBall.vx) - angleOffset),
                                         vy: BALL_SPEED_INITIAL * Math.sin(Math.atan2(originalBall.vy, originalBall.vx) - angleOffset),
-                                        hitsOnPaddle: 0
+                                        hitsOnPaddle: 0,
+                                        charge: originalBall.charge
                                     });
                                     maxNewBalls--;
                                 }
