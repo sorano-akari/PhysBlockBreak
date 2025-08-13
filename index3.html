@@ -1004,266 +1004,285 @@
         }
 
 function updateBall() {
-            const nextBalls = [];
-            for (let i = 0; i < balls.length; i++) {
-                const b = balls[i];
-                
-                const blockRadius = 6;
-                const minC = Math.max(0, Math.floor((b.x - blockRadius * BLOCK_WIDTH) / BLOCK_WIDTH));
-                const maxC = Math.min(BLOCK_COLUMN_COUNT - 1, Math.floor((b.x + blockRadius * BLOCK_WIDTH) / BLOCK_WIDTH));
-                const minR = Math.max(0, Math.floor((b.y - blockRadius * BLOCK_HEIGHT) / BLOCK_HEIGHT));
-                const maxR = Math.min(BLOCK_ROW_COUNT - 1, Math.floor((b.y + blockRadius * BLOCK_HEIGHT) / BLOCK_HEIGHT));
+    const nextBalls = [];
+    for (let i = 0; i < balls.length; i++) {
+        const b = balls[i];
 
-                for (let c = minC; c <= maxC; c++) {
-                    for (let r = minR; r <= maxR; r++) {
-                        const block = blocks[c * BLOCK_ROW_COUNT + r];
-                        if (block.status === 1 && block.isElectricForceBlock) {
-                            const blockCenterX = block.x + block.width / 2;
-                            const blockCenterY = block.y + block.height / 2;
-                            const dx = b.x - blockCenterX;
-                            const dy = b.y - blockCenterY;
-                            const distanceSq = dx * dx + dy * dy;
+        // --- Electric force from charge blocks (sign fixed: like charges repel, unlike attract) ---
+        const blockRadius = 6;
+        const minC = Math.max(0, Math.floor((b.x - blockRadius * BLOCK_WIDTH) / BLOCK_WIDTH));
+        const maxC = Math.min(BLOCK_COLUMN_COUNT - 1, Math.floor((b.x + blockRadius * BLOCK_WIDTH) / BLOCK_WIDTH));
+        const minR = Math.max(0, Math.floor((b.y - blockRadius * BLOCK_HEIGHT) / BLOCK_HEIGHT));
+        const maxR = Math.min(BLOCK_ROW_COUNT - 1, Math.floor((b.y + blockRadius * BLOCK_HEIGHT) / BLOCK_HEIGHT));
 
-                            if (distanceSq < POSITIVE_BLOCK_RANGE_SQ && distanceSq > 0) {
-                                const forceDirection = b.charge * block.electricCharge;
-                                const forceMagnitude = POSITIVE_BLOCK_FORCE / distanceSq;
-                                b.vx -= dx * forceMagnitude * forceDirection;
-                                b.vy -= dy * forceMagnitude * forceDirection;
-                            }
-                        }
+        for (let c = minC; c <= maxC; c++) {
+            for (let r = minR; r <= maxR; r++) {
+                const block = blocks[c * BLOCK_ROW_COUNT + r];
+                if (block.status === 1 && block.isElectricForceBlock) {
+                    const cx = block.x + block.width / 2;
+                    const cy = block.y + block.height / 2;
+                    const dx = b.x - cx;
+                    const dy = b.y - cy;
+                    const distSq = dx * dx + dy * dy;
+
+                    if (distSq > 0 && distSq < POSITIVE_BLOCK_RANGE_SQ) {
+                        // 単位ベクトル
+                        const invDist = 1 / Math.sqrt(distSq);
+                        const ux = dx * invDist;
+                        const uy = dy * invDist;
+
+                        // 反発: 同符号(>0) → 外向き、引力: 異符号(<0) → 内向き
+                        const qprod = b.charge * block.electricCharge;
+                        const accel = (POSITIVE_BLOCK_FORCE * qprod) / distSq;
+
+                        b.vx += ux * accel;
+                        b.vy += uy * accel;
                     }
-                }
-
-                b.vy += GRAVITY;
-                b.x += b.vx;
-                b.y += b.vy;
-
-                let currentSpeed = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
-                if (currentSpeed > 0) {
-                    let newSpeed;
-
-                    if (b.x + b.radius > CANVAS_WIDTH) {
-                        b.x = CANVAS_WIDTH - b.radius;
-                        b.vx *= -1 * DAMPING_FACTOR;
-                        newSpeed = Math.min(currentSpeed + collisionSpeedIncrement, MAX_BALL_SPEED);
-                        const scaleFactor = newSpeed / currentSpeed;
-                        b.vx *= scaleFactor;
-                        b.vy *= scaleFactor;
-                    }
-                    if (b.x - b.radius < 0) {
-                        b.x = b.radius;
-                        b.vx *= -1 * DAMPING_FACTOR;
-                        newSpeed = Math.min(currentSpeed + collisionSpeedIncrement, MAX_BALL_SPEED);
-                        const scaleFactor = newSpeed / currentSpeed;
-                        b.vx *= scaleFactor;
-                        b.vy *= scaleFactor;
-                    }
-                    if (b.y - b.radius < 0) {
-                        b.y = b.radius;
-                        b.vy *= -1 * DAMPING_FACTOR;
-                        newSpeed = Math.min(currentSpeed + collisionSpeedIncrement, MAX_BALL_SPEED);
-                        const scaleFactor = newSpeed / currentSpeed;
-                        b.vx *= scaleFactor;
-                        b.vy *= scaleFactor;
-                    }
-                }
-
-                if (
-                    b.y + b.radius > paddle.y &&
-                    b.y - b.radius < paddle.y + paddle.height &&
-                    b.x + b.radius > paddle.x &&
-                    b.x - b.radius < paddle.x + paddle.width
-                ) {
-                    if (b.vy > 0 && b.y < paddle.y + b.radius) {
-                        b.y = paddle.y - b.radius;
-                        b.hitsOnPaddle++;
-                        
-                        let newTargetSpeed;
-                        if (b.hitsOnPaddle <= 10) {
-                             newTargetSpeed = BALL_SPEED_INITIAL + b.hitsOnPaddle * speedIncrement;
-                        } else {
-                             newTargetSpeed = MAX_BALL_SPEED;
-                        }
-
-                        const hitPoint = (b.x - (paddle.x + paddle.width / 2)) / (paddle.width / 2);
-                        const clampedHitPoint = Math.max(-1, Math.min(1, hitPoint));
-                        const baseVx = clampedHitPoint * newTargetSpeed * 0.8;
-                        const paddleInfluence = 0.5;
-                        let newVx = baseVx + paddle.dx * paddleInfluence;
-                        newVx = Math.max(-newTargetSpeed, Math.min(newTargetSpeed, newVx));
-                        let newVy = -Math.sqrt(newTargetSpeed * newTargetSpeed - newVx * newVx);
-                        const minVyComponent = newTargetSpeed * 0.2;
-                        if (isNaN(newVy) || Math.abs(newVy) < minVyComponent) {
-                            newVy = -minVyComponent;
-                            newVx = Math.sqrt(newTargetSpeed * newTargetSpeed - newVy * newVy) * (newVx < 0 ? -1 : 1);
-                        }
-                        b.vx = newVx;
-                        b.vy = newVy;
-                    }
-                }
-
-                if (b.y + b.radius > CANVAS_HEIGHT) {
-                } else {
-                    nextBalls.push(b);
-                }
-
-                currentSpeed = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
-                if (currentSpeed > MAX_BALL_SPEED) {
-                    b.vx = (b.vx / currentSpeed) * MAX_BALL_SPEED;
-                    b.vy = (b.vy / currentSpeed) * MAX_BALL_SPEED;
-                }
-            }
-            balls = nextBalls;
-            if (balls.length === 0 && gameStarted) {
-                lives--;
-                if (lives > 0) {
-                    gameStarted = false;
-                    resetBall(false);
-                } else {
-                    gameStarted = false;
                 }
             }
         }
+        // --- end electric force ---
+
+        // 重力・位置更新
+        b.vy += GRAVITY;
+        b.x += b.vx;
+        b.y += b.vy;
+
+        // 壁バウンス + 速度上限管理
+        let currentSpeed = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+        if (currentSpeed > 0) {
+            let newSpeed;
+
+            if (b.x + b.radius > CANVAS_WIDTH) {
+                b.x = CANVAS_WIDTH - b.radius;
+                b.vx *= -1 * DAMPING_FACTOR;
+                newSpeed = Math.min(currentSpeed + collisionSpeedIncrement, MAX_BALL_SPEED);
+                const s = newSpeed / currentSpeed;
+                b.vx *= s; b.vy *= s;
+            }
+            if (b.x - b.radius < 0) {
+                b.x = b.radius;
+                b.vx *= -1 * DAMPING_FACTOR;
+                newSpeed = Math.min(currentSpeed + collisionSpeedIncrement, MAX_BALL_SPEED);
+                const s = newSpeed / currentSpeed;
+                b.vx *= s; b.vy *= s;
+            }
+            if (b.y - b.radius < 0) {
+                b.y = b.radius;
+                b.vy *= -1 * DAMPING_FACTOR;
+                newSpeed = Math.min(currentSpeed + collisionSpeedIncrement, MAX_BALL_SPEED);
+                const s = newSpeed / currentSpeed;
+                b.vx *= s; b.vy *= s;
+            }
+        }
+
+        // パドル衝突
+        if (
+            b.y + b.radius > paddle.y &&
+            b.y - b.radius < paddle.y + paddle.height &&
+            b.x + b.radius > paddle.x &&
+            b.x - b.radius < paddle.x + paddle.width
+        ) {
+            if (b.vy > 0 && b.y < paddle.y + b.radius) {
+                b.y = paddle.y - b.radius;
+                b.hitsOnPaddle++;
+
+                let newTargetSpeed = (b.hitsOnPaddle <= 10)
+                    ? BALL_SPEED_INITIAL + b.hitsOnPaddle * speedIncrement
+                    : MAX_BALL_SPEED;
+
+                const hitPoint = (b.x - (paddle.x + paddle.width / 2)) / (paddle.width / 2);
+                const clamped = Math.max(-1, Math.min(1, hitPoint));
+                const baseVx = clamped * newTargetSpeed * 0.8;
+                const paddleInfluence = 0.5;
+                let newVx = baseVx + paddle.dx * paddleInfluence;
+                newVx = Math.max(-newTargetSpeed, Math.min(newTargetSpeed, newVx));
+                let newVy = -Math.sqrt(Math.max(0, newTargetSpeed * newTargetSpeed - newVx * newVx));
+                const minVy = newTargetSpeed * 0.2;
+                if (isNaN(newVy) || Math.abs(newVy) < minVy) {
+                    newVy = -minVy;
+                    newVx = Math.sqrt(Math.max(0, newTargetSpeed * newTargetSpeed - newVy * newVy)) * (newVx < 0 ? -1 : 1);
+                }
+                b.vx = newVx;
+                b.vy = newVy;
+            }
+        }
+
+        // 画面下
+        if (b.y + b.radius <= CANVAS_HEIGHT) {
+            nextBalls.push(b);
+        }
+
+        // 最終的な速度上限
+        const sp = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+        if (sp > MAX_BALL_SPEED) {
+            b.vx = (b.vx / sp) * MAX_BALL_SPEED;
+            b.vy = (b.vy / sp) * MAX_BALL_SPEED;
+        }
+    }
+
+    balls = nextBalls;
+    if (balls.length === 0 && gameStarted) {
+        lives--;
+        if (lives > 0) {
+            gameStarted = false;
+            resetBall(false);
+        } else {
+            gameStarted = false;
+        }
+    }
+}
 
 function collisionDetection() {
-            let allBlocksDestroyed = true;
-            if (blocks.length !== BLOCK_COLUMN_COUNT * BLOCK_ROW_COUNT) {
-                return;
-            }
-            
-            for (let block of blocks) {
-                if (block.status === 1 && !block.isIndestructible && !block.isChargeBlock) {
-                    allBlocksDestroyed = false;
-                    break;
-                }
-            }
+    const EPS = 0.01;
 
-            for (let i = 0; i < balls.length; i++) {
-                const ball = balls[i];
-                let hitThisFrame = false;
+    let allBlocksDestroyed = true;
+    if (blocks.length !== BLOCK_COLUMN_COUNT * BLOCK_ROW_COUNT) return;
 
-                // 衝突したブロックが複数あった場合、ボールを押し戻す方向を正しく決定するため、
-                // 最もめり込み量が少ないブロックを探す
-                let minOverlap = Infinity;
-                let hitBlock = null;
-                let overlapX = 0;
-                let overlapY = 0;
-
-                for (let c = 0; c < BLOCK_COLUMN_COUNT; c++) {
-                    for (let r = 0; r < BLOCK_ROW_COUNT; r++) {
-                        const block = blocks[c * BLOCK_ROW_COUNT + r];
-                        if (block.status === 1) {
-                            const rect = {
-                                x: block.x,
-                                y: block.y,
-                                width: block.width,
-                                height: block.height
-                            };
-
-                            const rectCenter = {
-                                x: rect.x + rect.width / 2,
-                                y: rect.y + rect.height / 2
-                            };
-                            
-                            const dx = ball.x - rectCenter.x;
-                            const dy = ball.y - rectCenter.y;
-                            const clampedX = Math.max(rect.x, Math.min(ball.x, rect.x + rect.width));
-                            const clampedY = Math.max(rect.y, Math.min(ball.y, rect.y + rect.height));
-
-                            const distSq = (ball.x - clampedX) * (ball.x - clampedX) + (ball.y - clampedY) * (ball.y - clampedY);
-
-                            if (distSq <= ball.radius * ball.radius) {
-                                // 衝突が発生
-                                const overlap_x = ball.radius + rect.width / 2 - Math.abs(dx);
-                                const overlap_y = ball.radius + rect.height / 2 - Math.abs(dy);
-
-                                if (Math.min(overlap_x, overlap_y) < minOverlap) {
-                                    minOverlap = Math.min(overlap_x, overlap_y);
-                                    hitBlock = block;
-                                    overlapX = overlap_x;
-                                    overlapY = overlap_y;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (hitBlock) {
-                    if (overlapX > overlapY) { // 上下で衝突
-                        if (ball.y > hitBlock.y + hitBlock.height / 2) {
-                            ball.y += overlapY;
-                            ball.vy = Math.abs(ball.vy) * DAMPING_FACTOR;
-                        } else {
-                            ball.y -= overlapY;
-                            ball.vy = -Math.abs(ball.vy) * DAMPING_FACTOR;
-                        }
-                    } else { // 左右で衝突
-                        if (ball.x > hitBlock.x + hitBlock.width / 2) {
-                            ball.x += overlapX;
-                            ball.vx = Math.abs(ball.vx) * DAMPING_FACTOR;
-                        } else {
-                            ball.x -= overlapX;
-                            ball.vx = -Math.abs(ball.vx) * DAMPING_FACTOR;
-                        }
-                    }
-
-                    // ブロック衝突時の加速処理
-                    const currentSpeed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
-                    if (currentSpeed > 0) {
-                        const newSpeed = Math.min(currentSpeed + collisionSpeedIncrement, MAX_BALL_SPEED);
-                        const scaleFactor = newSpeed / currentSpeed;
-                        ball.vx *= scaleFactor;
-                        ball.vy *= scaleFactor;
-                    }
-
-                    // ブロックのプロパティを更新
-                    if (hitBlock.isChargeBlock) {
-                        ball.charge = Math.max(-3, Math.min(3, ball.charge + hitBlock.chargeChange));
-                    } else if (!hitBlock.isIndestructible) {
-                        hitBlock.hits--;
-                        if (hitBlock.hits <= 0) {
-                            hitBlock.status = 0;
-                            score += 10;
-                            if (Math.random() < 0.3) {
-                                const powerupTypes = ['paddle_enlarge', 'paddle_speedup'];
-                                if (balls.length < BALL_MAX_COUNT) {
-                                    powerupTypes.push('split_ball');
-                                }
-                                const randomType = powerupTypes[Math.floor(Math.random() * powerupTypes.length)];
-                                powerups.push({
-                                    x: hitBlock.x + hitBlock.width / 2 - POWERUP_SIZE / 2,
-                                    y: hitBlock.y + hitBlock.height / 2 - POWERUP_SIZE / 2,
-                                    size: POWERUP_SIZE,
-                                    color: (randomType === 'split_ball' ? '#ff00ff' : randomType === 'paddle_speedup' ? '#38a169' : '#ecc94b'),
-                                    type: randomType
-                                });
-                            }
-                        } else {
-                            hitBlock.color = COLOR_PALETTE[hitBlock.colorIndex][hitBlock.hits - 1];
-                        }
-                    }
-                    hitThisFrame = true;
-                }
-            }
-
-            if (gameStarted && allBlocksDestroyed) {
-                gameStarted = false;
-                drawWinScreen();
-                lives += 3;
-                isTransitioningToNextStage = true;
-                setTimeout(async () => {
-                    if (currentStageNumber < TOTAL_STAGES) {
-                        currentStageNumber++;
-                    } else {
-                        currentStageNumber = 1;
-                    }
-                    await initBlocks();
-                    resetBall(false);
-                    gameStarted = false;
-                    isTransitioningToNextStage = false;
-                }, 3000);
-            }
+    for (let block of blocks) {
+        if (block.status === 1 && !block.isIndestructible && !block.isChargeBlock) {
+            allBlocksDestroyed = false;
+            break;
         }
+    }
+
+    for (let i = 0; i < balls.length; i++) {
+        const ball = balls[i];
+
+        // 最大2回まで重なり解消（ギャップで同時に複数と当たるケース対策）
+        for (let iter = 0; iter < 2; iter++) {
+            let hitBlock = null;
+            let mtvX = 0, mtvY = 0;      // Minimum Translation Vector
+            let minPen = Infinity;
+
+            // 最小めり込みのブロックを探す
+            for (let c = 0; c < BLOCK_COLUMN_COUNT; c++) {
+                for (let r = 0; r < BLOCK_ROW_COUNT; r++) {
+                    const block = blocks[c * BLOCK_ROW_COUNT + r];
+                    if (block.status !== 1) continue;
+
+                    const rx = block.x, ry = block.y;
+                    const rw = block.width, rh = block.height;
+
+                    // 円-矩形の最近接点
+                    const cx = Math.max(rx, Math.min(ball.x, rx + rw));
+                    const cy = Math.max(ry, Math.min(ball.y, ry + rh));
+
+                    const dx = ball.x - cx;
+                    const dy = ball.y - cy;
+                    const distSq = dx * dx + dy * dy;
+
+                    if (distSq <= ball.radius * ball.radius) {
+                        // 矩形内のどの面に押し戻すかを、矩形中心からのペネトレーションで判定
+                        const centerX = rx + rw / 2;
+                        const centerY = ry + rh / 2;
+                        const px = (rw / 2 + ball.radius) - Math.abs(ball.x - centerX);
+                        const py = (rh / 2 + ball.radius) - Math.abs(ball.y - centerY);
+
+                        const pen = Math.min(px, py);
+                        if (pen < minPen) {
+                            minPen = pen;
+                            hitBlock = block;
+
+                            if (px < py) {
+                                // 左右面に押し戻す
+                                mtvX = (ball.x > centerX) ? (px) : (-px);
+                                mtvY = 0;
+                            } else {
+                                // 上下面に押し戻す
+                                mtvX = 0;
+                                mtvY = (ball.y > centerY) ? (py) : (-py);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (!hitBlock) break; // もう重なってない
+
+            // 境界へスナップ + ε分だけ外側へ
+            if (mtvX !== 0) {
+                if (mtvX > 0) {
+                    ball.x = hitBlock.x + hitBlock.width + ball.radius + EPS;
+                } else {
+                    ball.x = hitBlock.x - ball.radius - EPS;
+                }
+                ball.vx = -ball.vx * DAMPING_FACTOR;
+            } else {
+                if (mtvY > 0) {
+                    ball.y = hitBlock.y + hitBlock.height + ball.radius + EPS;
+                } else {
+                    ball.y = hitBlock.y - ball.radius - EPS;
+                }
+                ball.vy = -ball.vy * DAMPING_FACTOR;
+            }
+
+            // 反射後の単発加速
+            const sp0 = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+            if (sp0 > 0) {
+                const sp1 = Math.min(sp0 + collisionSpeedIncrement, MAX_BALL_SPEED);
+                const s = sp1 / sp0;
+                ball.vx *= s;
+                ball.vy *= s;
+            }
+
+            // --- 追加：無限反射防止の微小乱数摂動 ---
+            const perturb = 0.05; // 摂動の大きさ
+            ball.vx += (Math.random() * 2 - 1) * perturb;
+            ball.vy += (Math.random() * 2 - 1) * perturb;
+            // 速度上限チェック
+            const sp2 = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+            if (sp2 > MAX_BALL_SPEED) {
+                ball.vx = (ball.vx / sp2) * MAX_BALL_SPEED;
+                ball.vy = (ball.vy / sp2) * MAX_BALL_SPEED;
+            }
+
+            // ブロック側の処理（電荷付与や耐久）
+            if (hitBlock.isChargeBlock) {
+                ball.charge = Math.max(-3, Math.min(3, ball.charge + hitBlock.chargeChange));
+            } else if (!hitBlock.isIndestructible && !hitBlock.isElectricForceBlock) {
+                hitBlock.hits--;
+                if (hitBlock.hits <= 0) {
+                    hitBlock.status = 0;
+                    score += 10;
+                    if (Math.random() < 0.3) {
+                        const powerupTypes = ['paddle_enlarge', 'paddle_speedup'];
+                        if (balls.length < BALL_MAX_COUNT) powerupTypes.push('split_ball');
+                        const type = powerupTypes[Math.floor(Math.random() * powerupTypes.length)];
+                        powerups.push({
+                            x: hitBlock.x + hitBlock.width / 2 - POWERUP_SIZE / 2,
+                            y: hitBlock.y + hitBlock.height / 2 - POWERUP_SIZE / 2,
+                            size: POWERUP_SIZE,
+                            color: (type === 'split_ball' ? '#ff00ff' : type === 'paddle_speedup' ? '#38a169' : '#ecc94b'),
+                            type
+                        });
+                    }
+                } else {
+                    hitBlock.color = COLOR_PALETTE[hitBlock.colorIndex][hitBlock.hits - 1];
+                }
+            }
+
+            // 最大2回まで解消ループ続行
+        }
+    }
+
+    if (gameStarted && allBlocksDestroyed) {
+        gameStarted = false;
+        drawWinScreen();
+        lives += 3;
+        isTransitioningToNextStage = true;
+        setTimeout(async () => {
+            if (currentStageNumber < TOTAL_STAGES) currentStageNumber++;
+            else currentStageNumber = 1;
+            await initBlocks();
+            resetBall(false);
+            gameStarted = false;
+            isTransitioningToNextStage = false;
+        }, 3000);
+    }
+}
+
+
 
         function updatePowerups() {
             for (let i = powerups.length - 1; i >= 0; i--) {
