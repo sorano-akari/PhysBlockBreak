@@ -11,7 +11,7 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            min-height: 100vh;
+            min-height: 10vh;
             background-color: #1a202c;
             color: #e2e8f0;
             margin: 0;
@@ -99,6 +99,14 @@
             border: 2px solid transparent;
             cursor: pointer;
             transition: transform 0.1s, border-color 0.2s;
+            background-size: cover;
+            background-position: center;
+        }
+        .block-tile img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 2px;
         }
         .block-tile:hover {
             transform: scale(1.1);
@@ -129,6 +137,7 @@
             </div>
         </div>
     </div>
+    
 
     <script>
         const canvas = document.getElementById('gameCanvas');
@@ -145,7 +154,7 @@
             saveStageToFileButton.addEventListener('click', saveStageToFile);
             loadStageFromFileInput.addEventListener('change', loadStageFromFile);
         });
-        
+
         document.addEventListener('keydown', async (e) => {
             if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key) || e.code === 'Space') {
                 e.preventDefault();
@@ -163,8 +172,7 @@
                     if (blocks.length === BLOCK_COLUMN_COUNT * BLOCK_ROW_COUNT) {
                         startGame();
                     }
-                }
-                else {
+                } else {
                     await restartGame();
                 }
             }
@@ -182,22 +190,23 @@
 
         const BALL_RADIUS = 7;
         const BALL_SPEED_INITIAL = 5.0;
-        const MAX_BALL_SPEED = 12.0; // 修正案を反映
+        const MAX_BALL_SPEED = 12.0;
         const GRAVITY = 0.04;
         const DAMPING_FACTOR = 0.99;
         const BALL_MAX_COUNT = 40;
-        
+
         const BLOCK_ROW_COUNT = 16;
         const BLOCK_COLUMN_COUNT = 10;
         const BLOCK_WIDTH = CANVAS_WIDTH / BLOCK_COLUMN_COUNT;
         const BLOCK_HEIGHT = 20;
         const BLOCK_OFFSET_TOP = 50;
         const BLOCK_OFFSET_LEFT = 0;
-        
-        const POSITIVE_BLOCK_FORCE = 1.0; // 修正案を反映
-        const POSITIVE_BLOCK_RANGE_SQ = (BLOCK_WIDTH * 8) * (BLOCK_WIDTH * 8); // 修正案を反映
+
+        const ELEC_FORCE_AMPLITUDE = 40.0;
+        const POSITIVE_BLOCK_RANGE_SQ = (BLOCK_WIDTH * 16) * (BLOCK_WIDTH * 16);
         const ELECTROMAGNETIC_FORCE_CONSTANT = 0;
-        
+        const MAGNETIC_FIELD_STRENGTH = 0.005;
+
         const BALL_COLORS = ['#3182ce', '#63b3ed', '#a0aec0', '#e2e8f0', '#fbd38d', '#fc8181', '#e53e3e'];
 
         const POWERUP_SIZE = 20;
@@ -215,8 +224,8 @@
                 B = f & 0x0000ff;
             return "#" +
                 (0x1000000 + (Math.round((t - R) * p) + R) * 0x10000 +
-                (Math.round((t - G) * p) + G) * 0x100 +
-                (Math.round((t - B) * p) + B))
+                    (Math.round((t - G) * p) + G) * 0x100 +
+                    (Math.round((t - B) * p) + B))
                 .toString(16)
                 .slice(1);
         }
@@ -229,11 +238,107 @@
             ]);
         });
 
-        const TOTAL_STAGES = 5;
-        let currentStageNumber = 1;
-        
-        const speedIncrement = (MAX_BALL_SPEED - BALL_SPEED_INITIAL) / 10; // パドル衝突時の加速量
-        const collisionSpeedIncrement = speedIncrement / 4; // 壁やブロック衝突時の加速量
+        // ==== ステージ管理追加コード ====
+        let TOTAL_STAGES = 5;
+        let currentStageNumber = 0;
+        let stageSelectVisible = false;
+
+        // 起動時にステージ数を自動検出
+        async function detectTotalStages() {
+            let count = 0;
+            // 0からループを開始
+            for (let i = 0; ; i++) {
+                const stageNumberStr = String(i).padStart(2, '0');
+                try {
+                    const res = await fetch(`stage_${stageNumberStr}.json`, { method: "HEAD" });
+                    if (!res.ok) break;
+                    count++;
+                } catch (e) {
+                    break;
+                }
+            }
+            if (count > 0) TOTAL_STAGES = count;
+            console.log(`Total stages detected: ${TOTAL_STAGES}`);
+        }
+
+        // ステージ番号入力UI生成
+        function createStageSelectUI() {
+            const div = document.createElement("div");
+            div.id = "stage-select-ui";
+            div.style.position = "fixed";
+            div.style.top = "50%";
+            div.style.left = "50%";
+            div.style.transform = "translate(-50%, -50%)";
+            div.style.background = "#fff";
+            div.style.padding = "20px";
+            div.style.borderRadius = "8px";
+            div.style.color = "#333";
+            div.style.zIndex = "9999";
+            div.style.boxShadow = "0 4px 8px rgba(0,0,0,0.2)";
+            div.innerHTML = `
+                <label style="display:block; margin-bottom:10px;">ステージ番号: 
+                    <input type="number" id="stage-input" min="0" max="${TOTAL_STAGES - 1}" style="width:60px; padding: 5px; border: 1px solid #ccc; border-radius: 4px; color: #333;">
+                </label>
+                <div style="display:flex; justify-content:space-between;">
+                    <button id="stage-go" style="padding:8px 15px; border:none; border-radius:4px; background-color:#4c51bf; color:#fff; cursor:pointer;">Go</button>
+                    <button id="stage-cancel" style="padding:8px 15px; border:none; border-radius:4px; background-color:#e2e8f0; color:#333; cursor:pointer;">Cancel</button>
+                </div>
+            `;
+            document.body.appendChild(div);
+
+            document.getElementById("stage-go").onclick = () => {
+                const n = parseInt(document.getElementById("stage-input").value);
+                if (n >= 0 && n < TOTAL_STAGES) {
+                    currentStageNumber = n;
+                    initBlocks().then(() => {
+                        resetBall(false);
+                        gameStarted = false;
+                        toggleStageSelect(false);
+                    });
+                }
+            };
+            document.getElementById("stage-cancel").onclick = () => toggleStageSelect(false);
+        }
+
+        // 表示／非表示切り替え
+        function toggleStageSelect(show) {
+            stageSelectVisible = show;
+            const ui = document.getElementById("stage-select-ui");
+            if (show) {
+                if (!ui) createStageSelectUI();
+                else {
+                    ui.style.display = "block";
+                    document.getElementById("stage-input").setAttribute("max", TOTAL_STAGES - 1);
+                }
+                gameStarted = false;
+                isTransitioningToNextStage = false;
+            } else {
+                if (ui) ui.style.display = "none";
+                canvas.focus();
+            }
+        }
+
+        // Shift+Sで切り替え
+        document.addEventListener("keydown", (e) => {
+            if (e.key.toLowerCase() === "s" && e.shiftKey) {
+                toggleStageSelect(!stageSelectVisible);
+            }
+        });
+
+        async function nextStage() {
+            if (currentStageNumber < TOTAL_STAGES - 1) {
+                currentStageNumber++;
+            } else {
+                currentStageNumber = 0;
+            }
+            await initBlocks();
+            resetBall(false);
+            gameStarted = false;
+        }
+        // ==== ステージ管理追加コードここまで ====
+
+        const speedIncrement = (MAX_BALL_SPEED - BALL_SPEED_INITIAL) / 10;
+        const collisionSpeedIncrement = speedIncrement / 4;
 
         let paddle = {
             x: (CANVAS_WIDTH - PADDLE_WIDTH_INITIAL) / 2,
@@ -255,6 +360,7 @@
         let hasDragged = false;
         let startDragPos = { x: 0, y: 0 };
         let endDragPos = { x: 0, y: 0 };
+        
         let selectedBlock = {
             status: 1,
             hits: 1,
@@ -263,8 +369,12 @@
             chargeChange: 0,
             isElectricForceBlock: false,
             electricCharge: 0,
+            isMagneticBlock: false,
+            magneticCharge: 0,
+            isSuperAccelBlock: false,
             colorIndex: 0
         };
+
         let isTransitioningToNextStage = false;
 
         let rightPressed = false;
@@ -272,7 +382,7 @@
         let lastTouchX = 0;
         let touchActive = false;
         let mouseTargetX = null;
-        
+
         let unbreakableBlockImage = new Image();
         unbreakableBlockImage.src = 'unbreakable_block.png';
         let posChargeAddBlockImage = new Image();
@@ -283,6 +393,11 @@
         positiveBlockImage.src = 'positive_block.png';
         let negativeBlockImage = new Image();
         negativeBlockImage.src = 'negative_block.png';
+        
+        let magneticBlockImage = new Image();
+        magneticBlockImage.src = 'magnetic_block.png';
+        let superAccelBlockImage = new Image();
+        superAccelBlockImage.src = 'super_accel_block.png';
 
 
         function activateGameEventListeners() {
@@ -316,62 +431,76 @@
 
         function setupEditorBlockPicker() {
             editorBlockPicker.innerHTML = '';
-            
+
+            // --- 削除ブロック ---
             let deleteTile = document.createElement('div');
             deleteTile.className = 'block-tile';
             deleteTile.style.backgroundColor = '#1a202c';
-            deleteTile.setAttribute('data-status', '0');
             deleteTile.addEventListener('click', () => selectEditorBlock({ status: 0 }, deleteTile));
             editorBlockPicker.appendChild(deleteTile);
 
+            // --- 無敵ブロック ---
             let unbreakableTile = document.createElement('div');
             unbreakableTile.className = 'block-tile';
-            unbreakableTile.style.backgroundColor = '#A9A9A9';
-            unbreakableTile.setAttribute('data-hits', '100');
-            unbreakableTile.setAttribute('data-color-index', '-1');
-            unbreakableTile.setAttribute('data-status', '1');
-            unbreakableTile.addEventListener('click', () => selectEditorBlock({ status: 1, hits: 100, isIndestructible: true, isChargeBlock: false, chargeChange: 0, isElectricForceBlock: false, electricCharge: 0, colorIndex: -1 }, unbreakableTile));
+            unbreakableTile.innerHTML = `<img src="${unbreakableBlockImage.src}" alt="Unbreakable">`;
+            unbreakableTile.addEventListener('click', () => selectEditorBlock({ status: 1, hits: 100, isIndestructible: true, isChargeBlock: false, chargeChange: 0, isElectricForceBlock: false, electricCharge: 0, isMagneticBlock: false, magneticCharge: 0, isSuperAccelBlock: false, colorIndex: -1 }, unbreakableTile));
             editorBlockPicker.appendChild(unbreakableTile);
 
+            // --- 正電荷付与ブロック ---
             let posChargeTile = document.createElement('div');
             posChargeTile.className = 'block-tile';
-            posChargeTile.style.backgroundColor = 'rgba(255, 0, 0, 0.5)';
-            posChargeTile.addEventListener('click', () => selectEditorBlock({ status: 1, hits: 1, isIndestructible: true, isChargeBlock: true, chargeChange: 1, isElectricForceBlock: false, electricCharge: 0 }, posChargeTile));
+            posChargeTile.innerHTML = `<img src="${posChargeAddBlockImage.src}" alt="Pos Charge">`;
+            posChargeTile.addEventListener('click', () => selectEditorBlock({ status: 1, hits: 1, isIndestructible: true, isChargeBlock: true, chargeChange: 1, isElectricForceBlock: false, electricCharge: 0, isMagneticBlock: false, magneticCharge: 0, isSuperAccelBlock: false }, posChargeTile));
             editorBlockPicker.appendChild(posChargeTile);
 
+            // --- 負電荷付与ブロック ---
             let negChargeTile = document.createElement('div');
             negChargeTile.className = 'block-tile';
-            negChargeTile.style.backgroundColor = 'rgba(0, 0, 255, 0.5)';
-            negChargeTile.addEventListener('click', () => selectEditorBlock({ status: 1, hits: 1, isIndestructible: true, isChargeBlock: true, chargeChange: -1, isElectricForceBlock: false, electricCharge: 0 }, negChargeTile));
+            negChargeTile.innerHTML = `<img src="${negChargeAddBlockImage.src}" alt="Neg Charge">`;
+            negChargeTile.addEventListener('click', () => selectEditorBlock({ status: 1, hits: 1, isIndestructible: true, isChargeBlock: true, chargeChange: -1, isElectricForceBlock: false, electricCharge: 0, isMagneticBlock: false, magneticCharge: 0, isSuperAccelBlock: false }, negChargeTile));
             editorBlockPicker.appendChild(negChargeTile);
 
+            // --- 正電場ブロック ---
             let positiveElectricTile = document.createElement('div');
             positiveElectricTile.className = 'block-tile';
-            positiveElectricTile.style.backgroundColor = 'red';
-            positiveElectricTile.addEventListener('click', () => selectEditorBlock({ status: 1, hits: 1, isIndestructible: false, isChargeBlock: false, chargeChange: 0, isElectricForceBlock: true, electricCharge: 1, colorIndex: -1 }, positiveElectricTile));
+            positiveElectricTile.innerHTML = `<img src="${positiveBlockImage.src}" alt="Positive Block">`;
+            positiveElectricTile.addEventListener('click', () => selectEditorBlock({ status: 1, hits: 1, isIndestructible: false, isChargeBlock: false, chargeChange: 0, isElectricForceBlock: true, electricCharge: 1, isMagneticBlock: false, magneticCharge: 0, isSuperAccelBlock: false, colorIndex: -1 }, positiveElectricTile));
             editorBlockPicker.appendChild(positiveElectricTile);
-            
+
+            // --- 負電場ブロック ---
             let negativeElectricTile = document.createElement('div');
             negativeElectricTile.className = 'block-tile';
-            negativeElectricTile.style.backgroundColor = 'blue';
-            negativeElectricTile.addEventListener('click', () => selectEditorBlock({ status: 1, hits: 1, isIndestructible: false, isChargeBlock: false, chargeChange: 0, isElectricForceBlock: true, electricCharge: -1, colorIndex: -1 }, negativeElectricTile));
+            negativeElectricTile.innerHTML = `<img src="${negativeBlockImage.src}" alt="Negative Block">`;
+            negativeElectricTile.addEventListener('click', () => selectEditorBlock({ status: 1, hits: 1, isIndestructible: false, isChargeBlock: false, chargeChange: 0, isElectricForceBlock: true, electricCharge: -1, isMagneticBlock: false, magneticCharge: 0, isSuperAccelBlock: false, colorIndex: -1 }, negativeElectricTile));
             editorBlockPicker.appendChild(negativeElectricTile);
-            
+
+            // --- 磁場ブロック ---
+            let magneticBlockTile = document.createElement('div');
+            magneticBlockTile.className = 'block-tile';
+            magneticBlockTile.innerHTML = `<img src="${magneticBlockImage.src}" alt="Magnetic Block">`;
+            magneticBlockTile.addEventListener('click', () => selectEditorBlock({ status: 1, hits: 1, isIndestructible: false, isChargeBlock: false, chargeChange: 0, isElectricForceBlock: false, electricCharge: 0, isMagneticBlock: true, magneticCharge: 1, isSuperAccelBlock: false, colorIndex: -1 }, magneticBlockTile));
+            editorBlockPicker.appendChild(magneticBlockTile);
+
+            // --- 超加速ブロック ---
+            let superAccelBlockTile = document.createElement('div');
+            superAccelBlockTile.className = 'block-tile';
+            superAccelBlockTile.innerHTML = `<img src="${superAccelBlockImage.src}" alt="Super Accel Block">`;
+            superAccelBlockTile.addEventListener('click', () => selectEditorBlock({ status: 1, hits: 1, isIndestructible: true, isChargeBlock: false, chargeChange: 0, isElectricForceBlock: false, electricCharge: 0, isMagneticBlock: false, magneticCharge: 0, isSuperAccelBlock: true, colorIndex: -1 }, superAccelBlockTile));
+            editorBlockPicker.appendChild(superAccelBlockTile);
+
+            // --- 通常ブロック ---
             for (let r = 0; r < BASE_COLORS.length; r++) {
                 for (let h = 1; h <= 3; h++) {
                     const tile = document.createElement('div');
                     tile.className = 'block-tile';
                     tile.style.backgroundColor = COLOR_PALETTE[r][h - 1];
-                    tile.setAttribute('data-hits', h);
-                    tile.setAttribute('data-color-index', r);
-                    tile.setAttribute('data-status', '1');
-                    tile.addEventListener('click', () => selectEditorBlock({ status: 1, hits: h, isIndestructible: false, isChargeBlock: false, chargeChange: 0, isElectricForceBlock: false, electricCharge: 0, colorIndex: r }, tile));
+                    tile.addEventListener('click', () => selectEditorBlock({ status: 1, hits: h, isIndestructible: false, isChargeBlock: false, chargeChange: 0, isElectricForceBlock: false, electricCharge: 0, isMagneticBlock: false, magneticCharge: 0, isSuperAccelBlock: false, colorIndex: r }, tile));
                     editorBlockPicker.appendChild(tile);
                 }
             }
-            const firstTile = editorBlockPicker.querySelector('.block-tile[data-hits="1"][data-color-index="0"]');
+            const firstTile = editorBlockPicker.querySelector('.block-tile:not([style*="background-color: rgb(26, 32, 44)"])');
             if (firstTile) {
-                selectEditorBlock({ status: 1, hits: 1, isIndestructible: false, isChargeBlock: false, chargeChange: 0, isElectricForceBlock: false, electricCharge: 0, colorIndex: 0 }, firstTile);
+                selectEditorBlock({ status: 1, hits: 1, isIndestructible: false, isChargeBlock: false, chargeChange: 0, isElectricForceBlock: false, electricCharge: 0, isMagneticBlock: false, magneticCharge: 0, isSuperAccelBlock: false, colorIndex: 0 }, firstTile);
             }
         }
 
@@ -388,6 +517,9 @@
                 chargeChange: block.chargeChange || 0,
                 isElectricForceBlock: block.isElectricForceBlock || false,
                 electricCharge: block.electricCharge || 0,
+                isMagneticBlock: block.isMagneticBlock || false,
+                magneticCharge: block.magneticCharge || 0,
+                isSuperAccelBlock: block.isSuperAccelBlock || false,
                 colorIndex: block.colorIndex || 0
             };
         }
@@ -411,7 +543,7 @@
 
         function editorMouseDownHandler(e) {
             e.preventDefault();
-            
+
             const rect = canvas.getBoundingClientRect();
             startDragPos.x = e.clientX - rect.left;
             startDragPos.y = e.clientY - rect.top;
@@ -430,7 +562,7 @@
         function editorMouseUpHandler(e) {
             if (!isDragging) return;
             e.preventDefault();
-            
+
             const rect = canvas.getBoundingClientRect();
             const endDragX = e.clientX - rect.left;
             const endDragY = e.clientY - rect.top;
@@ -440,12 +572,11 @@
             let startC, endC, startR, endR;
 
             if (!hasDragged) {
-                // Single click logic
                 const mouseX = startDragPos.x;
                 const mouseY = startDragPos.y;
                 const c = Math.floor(mouseX / BLOCK_WIDTH);
                 const r = Math.floor((mouseY - BLOCK_OFFSET_TOP) / BLOCK_HEIGHT);
-                
+
                 if (c >= 0 && c < BLOCK_COLUMN_COUNT && r >= 0 && r < BLOCK_ROW_COUNT) {
                     const blockIndex = c * BLOCK_ROW_COUNT + r;
                     const block = blocks[blockIndex];
@@ -456,12 +587,11 @@
                     }
                 }
             } else {
-                // Drag and drop logic
                 startC = Math.floor(Math.min(startDragPos.x, endDragPos.x) / BLOCK_WIDTH);
                 endC = Math.floor(Math.max(startDragPos.x, endDragPos.x) / BLOCK_WIDTH);
                 startR = Math.floor((Math.min(startDragPos.y, endDragPos.y) - BLOCK_OFFSET_TOP) / BLOCK_HEIGHT);
                 endR = Math.floor((Math.max(startDragPos.y, endDragPos.y) - BLOCK_OFFSET_TOP) / BLOCK_HEIGHT);
-                
+
                 startC = Math.max(0, startC);
                 endC = Math.min(BLOCK_COLUMN_COUNT - 1, endC);
                 startR = Math.max(0, startR);
@@ -471,7 +601,7 @@
                     for (let r = startR; r <= endR; r++) {
                         const blockIndex = c * BLOCK_ROW_COUNT + r;
                         if (blockIndex >= 0 && blockIndex < blocks.length) {
-                           applyBlockProperties(blocks[blockIndex], selectedBlock);
+                            applyBlockProperties(blocks[blockIndex], selectedBlock);
                         }
                     }
                 }
@@ -482,22 +612,21 @@
             startDragPos = { x: 0, y: 0 };
             endDragPos = { x: 0, y: 0 };
         }
-        
+
         function applyBlockProperties(block, properties) {
-            block.status = properties.status; 
-            
+            block.status = properties.status;
+
             if (block.status === 1) {
                 block.isIndestructible = properties.isIndestructible;
                 block.isChargeBlock = properties.isChargeBlock;
                 block.chargeChange = properties.chargeChange;
                 block.isElectricForceBlock = properties.isElectricForceBlock;
                 block.electricCharge = properties.electricCharge;
+                block.isMagneticBlock = properties.isMagneticBlock;
+                block.magneticCharge = properties.magneticCharge;
+                block.isSuperAccelBlock = properties.isSuperAccelBlock;
 
-                if (!block.isIndestructible && !block.isChargeBlock && !block.isElectricForceBlock) {
-                    block.hits = properties.hits;
-                    block.colorIndex = properties.colorIndex;
-                    block.color = COLOR_PALETTE[block.colorIndex][block.hits - 1];
-                } else if (block.isChargeBlock) {
+                if (block.isChargeBlock) {
                     block.hits = 100;
                     block.colorIndex = -1;
                     block.color = block.chargeChange > 0 ? 'rgba(255, 0, 0, 0.5)' : 'rgba(0, 0, 255, 0.5)';
@@ -505,10 +634,23 @@
                     block.hits = 1;
                     block.colorIndex = -1;
                     block.color = block.electricCharge > 0 ? 'red' : 'blue';
+                } else if (block.isMagneticBlock) {
+                    block.hits = 1;
+                    block.colorIndex = -1;
+                    block.color = 'purple';
+                } else if (block.isSuperAccelBlock) {
+                    block.hits = 100;
+                    block.isIndestructible = true;
+                    block.colorIndex = -1;
+                    block.color = 'yellow';
                 } else if (block.isIndestructible) {
                     block.hits = 100;
                     block.colorIndex = -1;
                     block.color = '#A9A9A9';
+                } else {
+                    block.hits = properties.hits;
+                    block.colorIndex = properties.colorIndex;
+                    block.color = COLOR_PALETTE[block.colorIndex][block.hits - 1];
                 }
             }
         }
@@ -526,6 +668,9 @@
                     chargeChange: block.chargeChange,
                     isElectricForceBlock: block.isElectricForceBlock,
                     electricCharge: block.electricCharge,
+                    isMagneticBlock: block.isMagneticBlock,
+                    magneticCharge: block.magneticCharge,
+                    isSuperAccelBlock: block.isSuperAccelBlock,
                     colorIndex: block.colorIndex
                 };
             });
@@ -540,7 +685,7 @@
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
         }
-
+        
         function loadStageFromFile(event) {
             const file = event.target.files[0];
             if (!file) return;
@@ -552,7 +697,7 @@
                     if (stageData.length === blocks.length) {
                         blocks.forEach((block, index) => {
                             const savedBlock = stageData[index];
-                            
+
                             block.status = savedBlock.status;
                             if (block.status === 1) {
                                 block.hits = savedBlock.hits || 0;
@@ -561,11 +706,20 @@
                                 block.chargeChange = savedBlock.chargeChange || 0;
                                 block.isElectricForceBlock = savedBlock.isElectricForceBlock || false;
                                 block.electricCharge = savedBlock.electricCharge || 0;
+                                block.isMagneticBlock = savedBlock.isMagneticBlock || false;
+                                block.magneticCharge = savedBlock.magneticCharge || 0;
+                                block.isSuperAccelBlock = savedBlock.isSuperAccelBlock || false;
                                 block.colorIndex = savedBlock.colorIndex || 0;
+
                                 if (block.isChargeBlock) {
-                                   block.color = block.chargeChange > 0 ? 'rgba(255, 0, 0, 0.5)' : 'rgba(0, 0, 255, 0.5)';
+                                    block.color = block.chargeChange > 0 ? 'rgba(255, 0, 0, 0.5)' : 'rgba(0, 0, 255, 0.5)';
                                 } else if (block.isElectricForceBlock) {
                                     block.color = block.electricCharge > 0 ? 'red' : 'blue';
+                                } else if (block.isMagneticBlock) {
+                                    block.color = 'purple';
+                                } else if (block.isSuperAccelBlock) {
+                                    block.color = 'yellow';
+                                    block.isIndestructible = true;
                                 } else if (block.isIndestructible) {
                                     block.color = '#A9A9A9';
                                 } else {
@@ -578,6 +732,9 @@
                                 block.chargeChange = 0;
                                 block.isElectricForceBlock = false;
                                 block.electricCharge = 0;
+                                block.isMagneticBlock = false;
+                                block.magneticCharge = 0;
+                                block.isSuperAccelBlock = false;
                                 block.colorIndex = -1;
                                 block.color = '';
                             }
@@ -611,7 +768,7 @@
                 leftPressed = false;
             }
         }
-        
+
         function mouseMoveHandler(e) {
             const rect = canvas.getBoundingClientRect();
             const relativeX = e.clientX - rect.left;
@@ -625,7 +782,7 @@
             lastTouchX = e.touches[0].clientX - canvas.offsetLeft;
             touchActive = true;
         }
-        
+
         function touchMoveHandler(e) {
             e.preventDefault();
             if (touchActive) {
@@ -642,15 +799,19 @@
         }
 
         async function handleCanvasClick() {
+            if (stageSelectVisible) {
+                return;
+            }
             if (!gameStarted && !isTransitioningToNextStage) {
                 if (lives > 0) {
                     if (blocks.length === BLOCK_COLUMN_COUNT * BLOCK_ROW_COUNT) {
-                        startGame();
+                        console.log("Canvas clicked. Press 'ArrowUp' to start.");
                     }
                 } else {
                     await restartGame();
                 }
             }
+            canvas.focus();
         }
 
         function resetBall(isLaunching) {
@@ -676,12 +837,11 @@
             gameStarted = true;
             resetBall(true);
         }
-        
+
         async function initBlocks() {
             blocks = [];
-            const stageIndex = currentStageNumber - 1;
-            const filename = `stage_${stageIndex.toString().padStart(2, '0')}.json`;
-            
+            const filename = `stage_${String(currentStageNumber).padStart(2, '0')}.json`;
+
             try {
                 const response = await fetch(filename);
                 if (!response.ok) {
@@ -689,7 +849,7 @@
                     throw new Error(errorMessage);
                 }
                 const stageData = await response.json();
-                
+
                 if (stageData.length !== BLOCK_COLUMN_COUNT * BLOCK_ROW_COUNT) {
                     throw new Error('無効なステージファイル形式です。');
                 }
@@ -699,7 +859,7 @@
                     const r = index % BLOCK_ROW_COUNT;
                     const blockX = c * BLOCK_WIDTH + BLOCK_OFFSET_LEFT;
                     const blockY = r * BLOCK_HEIGHT + BLOCK_OFFSET_TOP;
-                    
+
                     const block = {
                         x: blockX,
                         y: blockY,
@@ -712,15 +872,23 @@
                         chargeChange: savedBlock.chargeChange || 0,
                         isElectricForceBlock: savedBlock.isElectricForceBlock || false,
                         electricCharge: savedBlock.electricCharge || 0,
+                        isMagneticBlock: savedBlock.isMagneticBlock || false,
+                        magneticCharge: savedBlock.magneticCharge || 0,
+                        isSuperAccelBlock: savedBlock.isSuperAccelBlock || false,
                         colorIndex: savedBlock.colorIndex || 0,
                         color: ''
                     };
-                    
+
                     if (block.status === 1) {
                         if (block.isChargeBlock) {
-                           block.color = block.chargeChange > 0 ? 'rgba(255, 0, 0, 0.5)' : 'rgba(0, 0, 255, 0.5)';
+                            block.color = block.chargeChange > 0 ? 'rgba(255, 0, 0, 0.5)' : 'rgba(0, 0, 255, 0.5)';
                         } else if (block.isElectricForceBlock) {
                             block.color = block.electricCharge > 0 ? 'red' : 'blue';
+                        } else if (block.isMagneticBlock) {
+                            block.color = 'purple';
+                        } else if (block.isSuperAccelBlock) {
+                            block.color = 'yellow';
+                            block.isIndestructible = true;
                         } else if (block.isIndestructible) {
                             block.color = '#A9A9A9';
                         } else {
@@ -743,7 +911,7 @@
                         const hits = isIndestructible ? 100 : Math.floor(Math.random() * 3) + 1;
                         const colorIndex = Math.floor(Math.random() * BASE_COLORS.length);
                         const color = isIndestructible ? '#A9A9A9' : COLOR_PALETTE[colorIndex][hits - 1];
-                        
+
                         blocks.push({
                             x: blockX,
                             y: blockY,
@@ -756,6 +924,9 @@
                             chargeChange: 0,
                             isElectricForceBlock: false,
                             electricCharge: 0,
+                            isMagneticBlock: false,
+                            magneticCharge: 0,
+                            isSuperAccelBlock: false,
                             colorIndex: colorIndex,
                             color: color
                         });
@@ -764,10 +935,10 @@
                 console.log(`ステージ${currentStageNumber}をランダム生成しました。`);
             }
         }
-        
+
         function draw() {
             ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-            
+
             if (!editorMode) {
                 updatePaddle();
                 if (gameStarted) {
@@ -791,12 +962,12 @@
             }
 
             drawPaddle();
-            
+
             if (!gameStarted && balls.length > 0) {
                 balls[0].x = paddle.x + paddle.width / 2;
                 balls[0].y = paddle.y - balls[0].radius;
             }
-            
+
             if (balls.length > 0) {
                 drawBall();
             }
@@ -814,14 +985,14 @@
                 }
             }
         }
-        
+
         function drawEditor() {
             drawBlocks();
         }
 
         function drawEditorPreview() {
             const rect = canvas.getBoundingClientRect();
-            
+
             let startC = Math.floor(Math.min(startDragPos.x, endDragPos.x) / BLOCK_WIDTH);
             let endC = Math.floor(Math.max(startDragPos.x, endDragPos.x) / BLOCK_WIDTH);
             let startR = Math.floor((Math.min(startDragPos.y, endDragPos.y) - BLOCK_OFFSET_TOP) / BLOCK_HEIGHT);
@@ -836,12 +1007,12 @@
             const previewY = startR * BLOCK_HEIGHT + BLOCK_OFFSET_TOP;
             const previewWidth = (endC - startC + 1) * BLOCK_WIDTH;
             const previewHeight = (endR - startR + 1) * BLOCK_HEIGHT;
-            
+
             if (previewWidth > 0 && previewHeight > 0 && previewY + previewHeight > BLOCK_OFFSET_TOP) {
-                 ctx.globalAlpha = 0.5;
-                 ctx.fillStyle = '#63b3ed';
-                 ctx.fillRect(previewX, previewY, previewWidth, previewHeight);
-                 ctx.globalAlpha = 1.0;
+                ctx.globalAlpha = 0.5;
+                ctx.fillStyle = '#63b3ed';
+                ctx.fillRect(previewX, previewY, previewWidth, previewHeight);
+                ctx.globalAlpha = 1.0;
             }
         }
 
@@ -857,7 +1028,7 @@
             balls.forEach(b => {
                 ctx.beginPath();
                 ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
-                
+
                 const chargeIndex = b.charge + 3;
                 const ballColor = BALL_COLORS[chargeIndex] || '#a0aec0';
                 ctx.fillStyle = ballColor;
@@ -874,12 +1045,16 @@
                     const block = blocks[c * BLOCK_ROW_COUNT + r];
                     if (block.status === 1) {
                         let imageToDraw = null;
-                        if (block.isIndestructible && !block.isChargeBlock) {
+                        if (block.isIndestructible && !block.isChargeBlock && !block.isSuperAccelBlock) {
                             imageToDraw = unbreakableBlockImage;
                         } else if (block.isChargeBlock) {
                             imageToDraw = block.chargeChange > 0 ? posChargeAddBlockImage : negChargeAddBlockImage;
                         } else if (block.isElectricForceBlock) {
                             imageToDraw = block.electricCharge > 0 ? positiveBlockImage : negativeBlockImage;
+                        } else if (block.isMagneticBlock) {
+                            imageToDraw = magneticBlockImage;
+                        } else if (block.isSuperAccelBlock) {
+                            imageToDraw = superAccelBlockImage;
                         }
 
                         if (imageToDraw && imageToDraw.complete && imageToDraw.naturalWidth > 0) {
@@ -956,7 +1131,7 @@
             ctx.font = '40px "Inter"';
             ctx.fillStyle = '#48bb78';
             ctx.textAlign = 'center';
-            if (currentStageNumber < TOTAL_STAGES) {
+            if (currentStageNumber < TOTAL_STAGES - 1) {
                 ctx.fillText(`ステージ${currentStageNumber}クリア！`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 20);
                 ctx.font = '20px "Inter"';
                 ctx.fillStyle = '#e2e8f0';
@@ -965,7 +1140,7 @@
                 ctx.fillText('Congratulations!!', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 20);
                 ctx.font = '20px "Inter"';
                 ctx.fillStyle = '#e2e8f0';
-                ctx.fillText('ステージ1に戻ります', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 20);
+                ctx.fillText('ステージ0に戻ります', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 20);
             }
             ctx.textAlign = 'left';
         }
@@ -975,7 +1150,7 @@
             powerups = [];
             score = 0;
             lives = 3;
-            currentStageNumber = 1;
+            currentStageNumber = 0;
             paddle.width = PADDLE_WIDTH_INITIAL;
             paddle.speed = PADDLE_SPEED_INITIAL;
             paddle.dx = 0;
@@ -986,7 +1161,7 @@
 
         function updatePaddle() {
             const prevPaddleX = paddle.x;
-            
+
             if (mouseTargetX !== null) {
                 const diff = mouseTargetX - paddle.x;
                 const moveAmount = Math.sign(diff) * Math.min(Math.abs(diff), paddle.speed);
@@ -996,142 +1171,143 @@
             } else if (leftPressed && paddle.x > 0) {
                 paddle.x -= paddle.speed;
             }
-            
+
             if (paddle.x < 0) paddle.x = 0;
             if (paddle.x + paddle.width > CANVAS_WIDTH) paddle.x = CANVAS_WIDTH - paddle.width;
-            
+
             paddle.dx = paddle.x - prevPaddleX;
         }
 
-function updateBall() {
-    const nextBalls = [];
-    for (let i = 0; i < balls.length; i++) {
-        const b = balls[i];
+        function updateBall() {
+            const nextBalls = [];
+            for (let i = 0; i < balls.length; i++) {
+                const b = balls[i];
 
-        // --- Electric force from charge blocks (sign fixed: like charges repel, unlike attract) ---
-        const blockRadius = 6;
-        const minC = Math.max(0, Math.floor((b.x - blockRadius * BLOCK_WIDTH) / BLOCK_WIDTH));
-        const maxC = Math.min(BLOCK_COLUMN_COUNT - 1, Math.floor((b.x + blockRadius * BLOCK_WIDTH) / BLOCK_WIDTH));
-        const minR = Math.max(0, Math.floor((b.y - blockRadius * BLOCK_HEIGHT) / BLOCK_HEIGHT));
-        const maxR = Math.min(BLOCK_ROW_COUNT - 1, Math.floor((b.y + blockRadius * BLOCK_HEIGHT) / BLOCK_HEIGHT));
+                const blockRadius = 16;
+                const minC = Math.max(0, Math.floor((b.x - blockRadius * BLOCK_WIDTH) / BLOCK_WIDTH));
+                const maxC = Math.min(BLOCK_COLUMN_COUNT - 1, Math.floor((b.x + blockRadius * BLOCK_WIDTH) / BLOCK_WIDTH));
+                const minR = Math.max(0, Math.floor((b.y - blockRadius * BLOCK_HEIGHT) / BLOCK_HEIGHT));
+                const maxR = Math.min(BLOCK_ROW_COUNT - 1, Math.floor((b.y + blockRadius * BLOCK_HEIGHT) / BLOCK_HEIGHT));
 
-        for (let c = minC; c <= maxC; c++) {
-            for (let r = minR; r <= maxR; r++) {
-                const block = blocks[c * BLOCK_ROW_COUNT + r];
-                if (block.status === 1 && block.isElectricForceBlock) {
-                    const cx = block.x + block.width / 2;
-                    const cy = block.y + block.height / 2;
-                    const dx = b.x - cx;
-                    const dy = b.y - cy;
-                    const distSq = dx * dx + dy * dy;
+                for (let c = minC; c <= maxC; c++) {
+                    for (let r = minR; r <= maxR; r++) {
+                        const block = blocks[c * BLOCK_ROW_COUNT + r];
+                        if (block.status === 1) {
+                            if (block.isElectricForceBlock) {
+                                const cx = block.x + block.width / 2;
+                                const cy = block.y + block.height / 2;
+                                const dx = b.x - cx;
+                                const dy = b.y - cy;
+                                const distSq = dx * dx + dy * dy;
 
-                    if (distSq > 0 && distSq < POSITIVE_BLOCK_RANGE_SQ) {
-                        // 単位ベクトル
-                        const invDist = 1 / Math.sqrt(distSq);
-                        const ux = dx * invDist;
-                        const uy = dy * invDist;
+                                if (distSq > 0 && distSq < POSITIVE_BLOCK_RANGE_SQ) {
+                                    const invDist = 1 / Math.sqrt(distSq);
+                                    const ux = dx * invDist;
+                                    const uy = dy * invDist;
 
-                        // 反発: 同符号(>0) → 外向き、引力: 異符号(<0) → 内向き
-                        const qprod = b.charge * block.electricCharge;
-                        const accel = (POSITIVE_BLOCK_FORCE * qprod) / distSq;
+                                    const qprod = b.charge * block.electricCharge;
+                                    const accel = (ELEC_FORCE_AMPLITUDE * qprod) / distSq;
 
-                        b.vx += ux * accel;
-                        b.vy += uy * accel;
+                                    b.vx += ux * accel;
+                                    b.vy += uy * accel;
+                                }
+                            }
+                            if (block.isMagneticBlock) {
+                                const cx = block.x + block.width / 2;
+                                const cy = block.y + block.height / 2;
+                                const distSq = (b.x - cx) ** 2 + (b.y - cy) ** 2;
+                                const magneticFieldStrength = MAGNETIC_FIELD_STRENGTH * block.magneticCharge / Math.sqrt(distSq);
+                                b.vx += b.vy * magneticFieldStrength;
+                                b.vy -= b.vx * magneticFieldStrength;
+                            }
+                        }
                     }
                 }
-            }
-        }
-        // --- end electric force ---
 
-        // 重力・位置更新
-        b.vy += GRAVITY;
-        b.x += b.vx;
-        b.y += b.vy;
+                b.vy += GRAVITY;
+                b.x += b.vx;
+                b.y += b.vy;
 
-        // 壁バウンス + 速度上限管理
-        let currentSpeed = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
-        if (currentSpeed > 0) {
-            let newSpeed;
+                let currentSpeed = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+                if (currentSpeed > 0) {
+                    let newSpeed;
 
-            if (b.x + b.radius > CANVAS_WIDTH) {
-                b.x = CANVAS_WIDTH - b.radius;
-                b.vx *= -1 * DAMPING_FACTOR;
-                newSpeed = Math.min(currentSpeed + collisionSpeedIncrement, MAX_BALL_SPEED);
-                const s = newSpeed / currentSpeed;
-                b.vx *= s; b.vy *= s;
-            }
-            if (b.x - b.radius < 0) {
-                b.x = b.radius;
-                b.vx *= -1 * DAMPING_FACTOR;
-                newSpeed = Math.min(currentSpeed + collisionSpeedIncrement, MAX_BALL_SPEED);
-                const s = newSpeed / currentSpeed;
-                b.vx *= s; b.vy *= s;
-            }
-            if (b.y - b.radius < 0) {
-                b.y = b.radius;
-                b.vy *= -1 * DAMPING_FACTOR;
-                newSpeed = Math.min(currentSpeed + collisionSpeedIncrement, MAX_BALL_SPEED);
-                const s = newSpeed / currentSpeed;
-                b.vx *= s; b.vy *= s;
-            }
-        }
-
-        // パドル衝突
-        if (
-            b.y + b.radius > paddle.y &&
-            b.y - b.radius < paddle.y + paddle.height &&
-            b.x + b.radius > paddle.x &&
-            b.x - b.radius < paddle.x + paddle.width
-        ) {
-            if (b.vy > 0 && b.y < paddle.y + b.radius) {
-                b.y = paddle.y - b.radius;
-                b.hitsOnPaddle++;
-
-                let newTargetSpeed = (b.hitsOnPaddle <= 10)
-                    ? BALL_SPEED_INITIAL + b.hitsOnPaddle * speedIncrement
-                    : MAX_BALL_SPEED;
-
-                const hitPoint = (b.x - (paddle.x + paddle.width / 2)) / (paddle.width / 2);
-                const clamped = Math.max(-1, Math.min(1, hitPoint));
-                const baseVx = clamped * newTargetSpeed * 0.8;
-                const paddleInfluence = 0.5;
-                let newVx = baseVx + paddle.dx * paddleInfluence;
-                newVx = Math.max(-newTargetSpeed, Math.min(newTargetSpeed, newVx));
-                let newVy = -Math.sqrt(Math.max(0, newTargetSpeed * newTargetSpeed - newVx * newVx));
-                const minVy = newTargetSpeed * 0.2;
-                if (isNaN(newVy) || Math.abs(newVy) < minVy) {
-                    newVy = -minVy;
-                    newVx = Math.sqrt(Math.max(0, newTargetSpeed * newTargetSpeed - newVy * newVy)) * (newVx < 0 ? -1 : 1);
+                    if (b.x + b.radius > CANVAS_WIDTH) {
+                        b.x = CANVAS_WIDTH - b.radius;
+                        b.vx *= -1 * DAMPING_FACTOR;
+                        newSpeed = Math.min(currentSpeed + collisionSpeedIncrement, MAX_BALL_SPEED);
+                        const s = newSpeed / currentSpeed;
+                        b.vx *= s; b.vy *= s;
+                    }
+                    if (b.x - b.radius < 0) {
+                        b.x = b.radius;
+                        b.vx *= -1 * DAMPING_FACTOR;
+                        newSpeed = Math.min(currentSpeed + collisionSpeedIncrement, MAX_BALL_SPEED);
+                        const s = newSpeed / currentSpeed;
+                        b.vx *= s; b.vy *= s;
+                    }
+                    if (b.y - b.radius < 0) {
+                        b.y = b.radius;
+                        b.vy *= -1 * DAMPING_FACTOR;
+                        newSpeed = Math.min(currentSpeed + collisionSpeedIncrement, MAX_BALL_SPEED);
+                        const s = newSpeed / currentSpeed;
+                        b.vx *= s; b.vy *= s;
+                    }
                 }
-                b.vx = newVx;
-                b.vy = newVy;
+
+                if (
+                    b.y + b.radius > paddle.y &&
+                    b.y - b.radius < paddle.y + paddle.height &&
+                    b.x + b.radius > paddle.x &&
+                    b.x - b.radius < paddle.x + paddle.width
+                ) {
+                    if (b.vy > 0 && b.y < paddle.y + b.radius) {
+                        b.y = paddle.y - b.radius;
+                        b.hitsOnPaddle++;
+
+                        let newTargetSpeed = (b.hitsOnPaddle <= 10)
+                            ? BALL_SPEED_INITIAL + b.hitsOnPaddle * speedIncrement
+                            : MAX_BALL_SPEED;
+
+                        const hitPoint = (b.x - (paddle.x + paddle.width / 2)) / (paddle.width / 2);
+                        const clamped = Math.max(-1, Math.min(1, hitPoint));
+                        const baseVx = clamped * newTargetSpeed * 0.8;
+                        const paddleInfluence = 0.5;
+                        let newVx = baseVx + paddle.dx * paddleInfluence;
+                        newVx = Math.max(-newTargetSpeed, Math.min(newTargetSpeed, newVx));
+                        let newVy = -Math.sqrt(Math.max(0, newTargetSpeed * newTargetSpeed - newVx * newVx));
+                        const minVy = newTargetSpeed * 0.2;
+                        if (isNaN(newVy) || Math.abs(newVy) < minVy) {
+                            newVy = -minVy;
+                            newVx = Math.sqrt(Math.max(0, newTargetSpeed * newTargetSpeed - newVy * newVy)) * (newVx < 0 ? -1 : 1);
+                        }
+                        b.vx = newVx;
+                        b.vy = newVy;
+                    }
+                }
+
+                if (b.y + b.radius <= CANVAS_HEIGHT) {
+                    nextBalls.push(b);
+                }
+
+                const sp = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+                if (sp > MAX_BALL_SPEED) {
+                    b.vx = (b.vx / sp) * MAX_BALL_SPEED;
+                    b.vy = (b.vy / sp) * MAX_BALL_SPEED;
+                }
+            }
+
+            balls = nextBalls;
+            if (balls.length === 0 && gameStarted) {
+                lives--;
+                if (lives > 0) {
+                    gameStarted = false;
+                    resetBall(false);
+                } else {
+                    gameStarted = false;
+                }
             }
         }
-
-        // 画面下
-        if (b.y + b.radius <= CANVAS_HEIGHT) {
-            nextBalls.push(b);
-        }
-
-        // 最終的な速度上限
-        const sp = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
-        if (sp > MAX_BALL_SPEED) {
-            b.vx = (b.vx / sp) * MAX_BALL_SPEED;
-            b.vy = (b.vy / sp) * MAX_BALL_SPEED;
-        }
-    }
-
-    balls = nextBalls;
-    if (balls.length === 0 && gameStarted) {
-        lives--;
-        if (lives > 0) {
-            gameStarted = false;
-            resetBall(false);
-        } else {
-            gameStarted = false;
-        }
-    }
-}
 
 function collisionDetection() {
     const EPS = 0.01;
@@ -1140,7 +1316,7 @@ function collisionDetection() {
     if (blocks.length !== BLOCK_COLUMN_COUNT * BLOCK_ROW_COUNT) return;
 
     for (let block of blocks) {
-        if (block.status === 1 && !block.isIndestructible && !block.isChargeBlock) {
+        if (block.status === 1 && !block.isIndestructible && !block.isSuperAccelBlock) {
             allBlocksDestroyed = false;
             break;
         }
@@ -1149,13 +1325,12 @@ function collisionDetection() {
     for (let i = 0; i < balls.length; i++) {
         const ball = balls[i];
 
-        // 最大2回まで重なり解消（ギャップで同時に複数と当たるケース対策）
         for (let iter = 0; iter < 2; iter++) {
             let hitBlock = null;
-            let mtvX = 0, mtvY = 0;      // Minimum Translation Vector
+            let mtvX = 0, mtvY = 0;
             let minPen = Infinity;
+            let hitPX = 0, hitPY = 0;
 
-            // 最小めり込みのブロックを探す
             for (let c = 0; c < BLOCK_COLUMN_COUNT; c++) {
                 for (let r = 0; r < BLOCK_ROW_COUNT; r++) {
                     const block = blocks[c * BLOCK_ROW_COUNT + r];
@@ -1164,7 +1339,6 @@ function collisionDetection() {
                     const rx = block.x, ry = block.y;
                     const rw = block.width, rh = block.height;
 
-                    // 円-矩形の最近接点
                     const cx = Math.max(rx, Math.min(ball.x, rx + rw));
                     const cy = Math.max(ry, Math.min(ball.y, ry + rh));
 
@@ -1173,7 +1347,6 @@ function collisionDetection() {
                     const distSq = dx * dx + dy * dy;
 
                     if (distSq <= ball.radius * ball.radius) {
-                        // 矩形内のどの面に押し戻すかを、矩形中心からのペネトレーションで判定
                         const centerX = rx + rw / 2;
                         const centerY = ry + rh / 2;
                         const px = (rw / 2 + ball.radius) - Math.abs(ball.x - centerX);
@@ -1183,13 +1356,13 @@ function collisionDetection() {
                         if (pen < minPen) {
                             minPen = pen;
                             hitBlock = block;
+                            hitPX = px;
+                            hitPY = py;
 
                             if (px < py) {
-                                // 左右面に押し戻す
                                 mtvX = (ball.x > centerX) ? (px) : (-px);
                                 mtvY = 0;
                             } else {
-                                // 上下面に押し戻す
                                 mtvX = 0;
                                 mtvY = (ball.y > centerY) ? (py) : (-py);
                             }
@@ -1198,10 +1371,26 @@ function collisionDetection() {
                 }
             }
 
-            if (!hitBlock) break; // もう重なってない
+            if (!hitBlock) break;
 
-            // 境界へスナップ + ε分だけ外側へ
-            if (mtvX !== 0) {
+            const centerX = hitBlock.x + hitBlock.width / 2;
+            const centerY = hitBlock.y + hitBlock.height / 2;
+            const angleThreshold = 1.0;
+
+            if (Math.abs(hitPX - hitPY) <= angleThreshold) {
+                if (ball.x > centerX) {
+                    ball.x = hitBlock.x + hitBlock.width + ball.radius + EPS;
+                } else {
+                    ball.x = hitBlock.x - ball.radius - EPS;
+                }
+                if (ball.y > centerY) {
+                    ball.y = hitBlock.y + hitBlock.height + ball.radius + EPS;
+                } else {
+                    ball.y = hitBlock.y - ball.radius - EPS;
+                }
+                ball.vx = -ball.vx * DAMPING_FACTOR;
+                ball.vy = -ball.vy * DAMPING_FACTOR;
+            } else if (mtvX !== 0) {
                 if (mtvX > 0) {
                     ball.x = hitBlock.x + hitBlock.width + ball.radius + EPS;
                 } else {
@@ -1217,30 +1406,37 @@ function collisionDetection() {
                 ball.vy = -ball.vy * DAMPING_FACTOR;
             }
 
-            // 反射後の単発加速
-            const sp0 = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
-            if (sp0 > 0) {
-                const sp1 = Math.min(sp0 + collisionSpeedIncrement, MAX_BALL_SPEED);
-                const s = sp1 / sp0;
-                ball.vx *= s;
-                ball.vy *= s;
+            if (hitBlock.isSuperAccelBlock) {
+                const currentSpeed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+                const accelAmount = speedIncrement * 2;
+                const newSpeed = Math.min(currentSpeed + accelAmount, MAX_BALL_SPEED);
+                if (currentSpeed > 0) {
+                    const s = newSpeed / currentSpeed;
+                    ball.vx *= s;
+                    ball.vy *= s;
+                }
+            } else {
+                const sp0 = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+                if (sp0 > 0) {
+                    const sp1 = Math.min(sp0 + collisionSpeedIncrement, MAX_BALL_SPEED);
+                    const s = sp1 / sp0;
+                    ball.vx *= s;
+                    ball.vy *= s;
+                }
             }
 
-            // --- 追加：無限反射防止の微小乱数摂動 ---
-            const perturb = 0.05; // 摂動の大きさ
+            const perturb = 0.05;
             ball.vx += (Math.random() * 2 - 1) * perturb;
             ball.vy += (Math.random() * 2 - 1) * perturb;
-            // 速度上限チェック
             const sp2 = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
             if (sp2 > MAX_BALL_SPEED) {
                 ball.vx = (ball.vx / sp2) * MAX_BALL_SPEED;
                 ball.vy = (ball.vy / sp2) * MAX_BALL_SPEED;
             }
-
-            // ブロック側の処理（電荷付与や耐久）
+            
             if (hitBlock.isChargeBlock) {
                 ball.charge = Math.max(-3, Math.min(3, ball.charge + hitBlock.chargeChange));
-            } else if (!hitBlock.isIndestructible && !hitBlock.isElectricForceBlock) {
+            } else if (!hitBlock.isIndestructible) {
                 hitBlock.hits--;
                 if (hitBlock.hits <= 0) {
                     hitBlock.status = 0;
@@ -1261,8 +1457,6 @@ function collisionDetection() {
                     hitBlock.color = COLOR_PALETTE[hitBlock.colorIndex][hitBlock.hits - 1];
                 }
             }
-
-            // 最大2回まで解消ループ続行
         }
     }
 
@@ -1272,8 +1466,8 @@ function collisionDetection() {
         lives += 3;
         isTransitioningToNextStage = true;
         setTimeout(async () => {
-            if (currentStageNumber < TOTAL_STAGES) currentStageNumber++;
-            else currentStageNumber = 1;
+            if (currentStageNumber < TOTAL_STAGES - 1) currentStageNumber++;
+            else currentStageNumber = 0;
             await initBlocks();
             resetBall(false);
             gameStarted = false;
@@ -1281,7 +1475,6 @@ function collisionDetection() {
         }, 3000);
     }
 }
-
 
 
         function updatePowerups() {
@@ -1304,7 +1497,7 @@ function collisionDetection() {
                             for (let j = 0; j < currentBallsCount && maxNewBalls > 0; j++) {
                                 const originalBall = balls[j];
                                 const angleOffset = Math.PI / 10;
-                                
+
                                 ballsToAdd.push({
                                     x: originalBall.x,
                                     y: originalBall.y,
@@ -1315,7 +1508,7 @@ function collisionDetection() {
                                     charge: originalBall.charge
                                 });
                                 maxNewBalls--;
-                                
+
                                 if (maxNewBalls > 0) {
                                     ballsToAdd.push({
                                         x: originalBall.x,
@@ -1350,6 +1543,8 @@ function collisionDetection() {
         }
 
         setupGame();
+        detectTotalStages();
+
     </script>
 </body>
 </html>
